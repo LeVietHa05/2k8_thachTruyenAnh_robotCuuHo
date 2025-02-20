@@ -3,10 +3,14 @@
 #include <ArduinoJson.h>
 #include <TinyGPS++.h>
 #include <HardwareSerial.h>
+#include <WiFiManager.h>
 
-#define WIFI_SSID "your_wifi"
-#define WIFI_PASSWORD "your_password"
-#define API_URL "https://api.openrouteservice.org/v2/directions/driving-hgv?api_key=5b3ce3597851110001cf62489b1a4894dc59438fa047b32238086ce2&start=%20105.79887063405867,%2021.01852430824737&end=105.79762065889055,%2021.017536256274408"
+#define API_URL "https://api.openrouteservice.org/v2/directions/driving-hgv"
+#define API_KEY "5b3ce3597851110001cf62489b1a4894dc59438fa047b32238086ce2"
+#define temp "?start=%20105.79887063405867,%2021.01852430824737&end=105.79762065889055,%2021.017536256274408"
+
+#define dw digitalWrite
+#define dr digitalRead
 
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
@@ -27,11 +31,17 @@ void setup()
   Serial.begin(115200);
   gpsSerial.begin(9600, SERIAL_8N1, 16, 17);
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED)
+  bool res = WiFiManager::connect();
+  if (!res)
   {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
+    Serial.println("Failed to connect to WiFi");
+    while (1)
+    {
+      dw(LED_BUILTIN, HIGH);
+      delay(300);
+      dw(LED_BUILTIN, LOW);
+      delay(300);
+    }
   }
 
   Serial.println("Connected!");
