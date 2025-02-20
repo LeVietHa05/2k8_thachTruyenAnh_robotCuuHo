@@ -5,9 +5,10 @@
 #include <TinyGPS++.h>
 #include <HardwareSerial.h>
 #include <WiFiManager.h>
+#include "config.h"
 
 #define API_URL "https://api.openrouteservice.org/v2/directions/driving-hgv"
-#define API_KEY "5b3ce3597851110001cf62489b1a4894dc59438fa047b32238086ce2"
+
 #define temp "?start=%20105.79887063405867,%2021.01852430824737&end=105.79762065889055,%2021.017536256274408"
 
 #define dw digitalWrite
@@ -115,7 +116,8 @@ void loop()
 void fetchRoute()
 {
   HTTPClient http;
-  http.begin(API_URL);
+  http.begin(API_URL + String("?api_key=") + API_KEY);
+
   int httpCode = http.GET();
 
   if (httpCode == 200)
