@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
@@ -11,6 +12,18 @@
 
 #define dw digitalWrite
 #define dr digitalRead
+
+#define MT1_L 25
+#define MT1_R 26
+#define MT2_L 27
+#define MT2_R 14
+
+#define PWM_CHANNEL0 0
+#define PWM_CHANNEL1 1
+#define PWM_CHANNEL2 2
+#define PWM_CHANNEL3 3
+#define PWM_FREQ 5000
+#define PWM_RESOLUTION 8
 
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
@@ -26,12 +39,21 @@ struct Step
 Step steps[10]; // Lưu tối đa 10 bước
 int currentStep = 0;
 
+void fetchRoute();
+void moveAccordingToStep(int type);
+void turnLeft();
+void turnRight();
+void moveForward();
+void stopMotors();
+
 void setup()
 {
   Serial.begin(115200);
   gpsSerial.begin(9600, SERIAL_8N1, 16, 17);
 
-  bool res = WiFiManager::connect();
+  WiFiManager wm;
+
+  bool res = wm.autoConnect("AutoConnectAP", "password");
   if (!res)
   {
     Serial.println("Failed to connect to WiFi");
@@ -46,6 +68,15 @@ void setup()
 
   Serial.println("Connected!");
   fetchRoute();
+
+  ledcSetup(PWM_CHANNEL0, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL1, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL3, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(MT1_L, PWM_CHANNEL0);
+  ledcAttachPin(MT1_R, PWM_CHANNEL1);
+  ledcAttachPin(MT2_L, PWM_CHANNEL2);
+  ledcAttachPin(MT2_R, PWM_CHANNEL3);
 }
 
 void loop()
@@ -144,30 +175,31 @@ void moveAccordingToStep(int type)
 // 📌 Hàm di chuyển robot
 void moveForward()
 {
-  digitalWrite(25, HIGH);
-  digitalWrite(26, HIGH);
-  analogWrite(27, 100);
-  analogWrite(14, 100);
+  ledcWrite(PWM_CHANNEL0, 255);
+  ledcWrite(PWM_CHANNEL1, 0);
+  ledcWrite(PWM_CHANNEL2, 255);
+  ledcWrite(PWM_CHANNEL3, 0);
 }
 
 void turnLeft()
 {
-  digitalWrite(25, LOW);
-  digitalWrite(26, HIGH);
-  analogWrite(27, 50);
-  analogWrite(14, 100);
+  ledcWrite(PWM_CHANNEL0, 100);
+  ledcWrite(PWM_CHANNEL1, 0);
+  ledcWrite(PWM_CHANNEL2, 255);
+  ledcWrite(PWM_CHANNEL3, 0);
 }
 
 void turnRight()
 {
-  digitalWrite(25, HIGH);
-  digitalWrite(26, LOW);
-  analogWrite(27, 100);
-  analogWrite(14, 50);
+  ledcWrite(PWM_CHANNEL0, 255);
+  ledcWrite(PWM_CHANNEL1, 0);
+  ledcWrite(PWM_CHANNEL2, 100);
+  ledcWrite(PWM_CHANNEL3, 0);
 }
-
 void stopMotors()
 {
-  analogWrite(27, 0);
-  analogWrite(14, 0);
+  ledcWrite(PWM_CHANNEL0, 0);
+  ledcWrite(PWM_CHANNEL1, 0);
+  ledcWrite(PWM_CHANNEL2, 0);
+  ledcWrite(PWM_CHANNEL3, 0);
 }
