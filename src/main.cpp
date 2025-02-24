@@ -6,6 +6,7 @@
 #include <HardwareSerial.h>
 #include <WiFiManager.h>
 #include "config.h"
+#include <esp_task_wdt.h>
 
 #define API_URL "https://api.openrouteservice.org/v2/directions/driving-hgv"
 
@@ -49,7 +50,12 @@ void stopMotors();
 
 void setup()
 {
+  // Initialize watchdog timer (5 second timeout)
+  esp_task_wdt_init(5, true);
+  esp_task_wdt_add(NULL); // Add current task to watchdog
+
   Serial.begin(115200);
+
   gpsSerial.begin(9600, SERIAL_8N1, 16, 17);
 
   WiFiManager wm;
@@ -80,34 +86,56 @@ void setup()
   ledcAttachPin(MT2_R, PWM_CHANNEL3);
 }
 
+unsigned long lastGPSUpdate = 0;
+const unsigned long GPS_TIMEOUT = 10000; // 10 seconds
+
 void loop()
 {
+  // Reset watchdog timer
+  esp_task_wdt_reset();
+
+  // Check for GPS signal
   while (gpsSerial.available())
   {
     gps.encode(gpsSerial.read());
-    if (gps.location.isUpdated())
+    lastGPSUpdate = millis();
+  }
+
+  // Handle GPS signal loss
+  if (millis() - lastGPSUpdate > GPS_TIMEOUT)
+  {
+    Serial.println("Warning: GPS signal lost!");
+    stopMotors();
+    return; // Skip navigation until signal is restored
+  }
+
+  if (gps.location.isUpdated())
+
+  {
+    float lat_now = gps.location.lat();
+    float lon_now = gps.location.lng();
+
+    Serial.printf("Current: %f, %f\n", lat_now, lon_now);
+
+    if (currentStep < 10)
     {
-      float lat_now = gps.location.lat();
-      float lon_now = gps.location.lng();
-
-      Serial.printf("Current: %f, %f\n", lat_now, lon_now);
-
-      if (currentStep < 10)
+      Serial.printf("Instruction: %s\n", steps[currentStep].instruction.c_str());
+      // Only move if we have valid GPS signal
+      if (millis() - lastGPSUpdate <= GPS_TIMEOUT)
       {
-        Serial.printf("Instruction: %s\n", steps[currentStep].instruction.c_str());
         moveAccordingToStep(steps[currentStep].type);
+      }
 
-        // Giả lập đi xong đoạn đường
-        delay(steps[currentStep].duration * 1000);
-        currentStep++;
-      }
-      else
-      {
-        stopMotors();
-        Serial.println("Route completed!");
-        while (1)
-          ;
-      }
+      // Giả lập đi xong đoạn đường
+      delay(steps[currentStep].duration * 1000);
+      currentStep++;
+    }
+    else
+    {
+      stopMotors();
+      Serial.println("Route completed!");
+      while (1)
+        ;
     }
   }
 }
@@ -115,36 +143,57 @@ void loop()
 // 📌 Lấy dữ liệu tuyến đường từ API
 void fetchRoute()
 {
-  HTTPClient http;
-  http.begin(API_URL + String("?api_key=") + API_KEY);
+  const int MAX_RETRIES = 3;
+  const int RETRY_DELAY = 1000; // 1 second between retries
+  int retryCount = 0;
+  bool success = false;
 
-  int httpCode = http.GET();
-
-  if (httpCode == 200)
+  while (retryCount < MAX_RETRIES && !success)
   {
-    String payload = http.getString();
-    Serial.println("Received route:");
-    Serial.println(payload);
+    HTTPClient http;
+    http.begin(API_URL + String("?api_key=") + API_KEY));
+    http.setTimeout(5000); // 5 second timeout
 
-    StaticJsonDocument<2048> doc;
-    deserializeJson(doc, payload);
+    int httpCode = http.GET();
 
-    JsonArray stepsJson = doc["segments"][0]["steps"];
-    int i = 0;
-    for (JsonObject step : stepsJson)
+    if (httpCode == 200)
     {
-      steps[i].distance = step["distance"];
-      steps[i].duration = step["duration"];
-      steps[i].type = step["type"];
-      steps[i].instruction = step["instruction"].as<String>();
-      i++;
+      String payload = http.getString();
+      Serial.println("Received route:");
+      Serial.println(payload);
+
+      StaticJsonDocument<2048> doc;
+      deserializeJson(doc, payload);
+
+      JsonArray stepsJson = doc["segments"][0]["steps"];
+      int i = 0;
+      for (JsonObject step : stepsJson)
+      {
+        steps[i].distance = step["distance"];
+        steps[i].duration = step["duration"];
+        steps[i].type = step["type"];
+        steps[i].instruction = step["instruction"].as<String>();
+        i++;
+      }
+      success = true;
     }
+    else
+    {
+      Serial.printf("HTTP error: %d (Attempt %d/%d)\n", httpCode, retryCount + 1, MAX_RETRIES);
+      retryCount++;
+      if (retryCount < MAX_RETRIES)
+      {
+        delay(RETRY_DELAY);
+      }
+    }
+    http.end();
   }
-  else
+
+  if (!success)
   {
-    Serial.printf("HTTP error: %d\n", httpCode);
+    Serial.println("Failed to fetch route after maximum retries");
+    // Optionally implement fallback behavior here
   }
-  http.end();
 }
 
 // 📌 Điều khiển robot theo từng loại bước
