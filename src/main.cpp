@@ -9,8 +9,7 @@
 #include <esp_task_wdt.h>
 #include <Wire.h>
 #include <MPU6050.h>
-#include <Encoder.h>
-
+#include <ESP32Encoder.h>
 
 #define API_URL "https://api.openrouteservice.org/v2/directions/driving-hgv"
 
@@ -24,6 +23,11 @@
 #define MT2_L 27
 #define MT2_R 14
 
+#define ENC_L_A 32
+#define ENC_L_B 33
+#define ENC_R_A 34
+#define ENC_R_B 35
+
 #define PWM_CHANNEL0 0
 #define PWM_CHANNEL1 1
 #define PWM_CHANNEL2 2
@@ -31,13 +35,18 @@
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
 
+#define GPS_RX 16
+#define GPS_TX 17
+
+#define MAX_STEP_ALLOWED 10
+
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 
 // MPU6050 and Encoder objects
 MPU6050 mpu;
-Encoder encoderLeft(ENC_L_A, ENC_L_B);
-Encoder encoderRight(ENC_R_A, ENC_R_B);
+ESP32Encoder encoderLeft;
+ESP32Encoder encoderRight;
 
 // Variables for sensor data and motor control
 float yaw = 0;
@@ -60,9 +69,6 @@ float rightIntegral = 0;
 float leftDerivative = 0;
 float rightDerivative = 0;
 
-
-
-
 struct Step
 {
   float distance;
@@ -73,8 +79,7 @@ struct Step
   float targetLon;
 };
 
-
-Step steps[10]; // Lưu tối đa 10 bước
+Step steps[MAX_STEP_ALLOWED]; // Lưu tối đa 10 bước
 int currentStep = 0;
 
 void fetchRoute();
@@ -97,7 +102,7 @@ void setup()
 
   Serial.begin(115200);
 
-  gpsSerial.begin(9600, SERIAL_8N1, 16, 17);
+  gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
 
   WiFiManager wm;
 
@@ -125,6 +130,17 @@ void setup()
   ledcAttachPin(MT1_R, PWM_CHANNEL1);
   ledcAttachPin(MT2_L, PWM_CHANNEL2);
   ledcAttachPin(MT2_R, PWM_CHANNEL3);
+
+  ESP32Encoder::useInternalWeakPullResistors = puType::up;
+
+  encoderLeft.attachHalfQuad(ENC_L_A, ENC_L_B);
+  encoderRight.attachHalfQuad(ENC_R_A, ENC_R_B);
+
+  encoderLeft.clearCount();
+  encoderRight.clearCount();
+
+  encoderLeft.setCount(0);
+  encoderRight.setCount(0);
 }
 
 unsigned long lastGPSUpdate = 0;
@@ -142,11 +158,12 @@ void loop()
   yaw += gz / 131.0 * dt; // 131 LSB/degree/sec
   
   // Read and process encoder data
-  long leftPos = encoderLeft.read();
-  long rightPos = encoderRight.read();
-  long leftDelta = leftPos - lastLeftCount;
-  long rightDelta = rightPos - lastRightCount;
-  
+  int64_t leftPos = encoderLeft.getCount();
+  int64_t rightPos = encoderRight.getCount();
+
+  int64_t leftDelta = leftPos - lastLeftCount;
+  int64_t rightDelta = rightPos - lastRightCount;
+
   // Update last values
   lastLeftCount = leftPos;
   lastRightCount = rightPos;
@@ -214,7 +231,7 @@ void fetchRoute()
   while (retryCount < MAX_RETRIES && !success)
   {
     HTTPClient http;
-    http.begin(API_URL + String("?api_key=") + API_KEY));
+    http.begin(API_URL + String("?api_key=") + API_KEY);
     http.setTimeout(5000); // 5 second timeout
 
     int httpCode = http.GET();
@@ -236,6 +253,14 @@ void fetchRoute()
         steps[i].duration = step["duration"];
         steps[i].type = step["type"];
         steps[i].instruction = step["instruction"].as<String>();
+        // Extract coordinates from step geometry
+        JsonArray coordinates = step["geometry"]["coordinates"];
+        if (coordinates.size() > 0)
+        {
+          steps[i].targetLon = coordinates[0][0];
+          steps[i].targetLat = coordinates[0][1];
+        }
+
         i++;
       }
       success = true;
@@ -291,8 +316,8 @@ void calculateMotorSpeeds()
 {
   // Calculate speed from encoder deltas
   float dt = (millis() - lastSensorUpdate) / 1000.0;
-  leftSpeed = (encoderLeft.read() - lastLeftCount) / dt;
-  rightSpeed = (encoderRight.read() - lastRightCount) / dt;
+  leftSpeed = (encoderLeft.getCount() - lastLeftCount) / dt;
+  rightSpeed = (encoderRight.getCount() - lastRightCount) / dt;
 }
 
 void updateMotorControl()
@@ -359,9 +384,9 @@ void moveForward()
   float currentLon = gps.location.lng();
   
   // Get next waypoint from steps
-  float targetLat = steps[currentStep].distance; // TODO: Update with actual waypoint data
-  float targetLon = steps[currentStep].duration; // TODO: Update with actual waypoint data
-  
+  float targetLat = steps[currentStep].targetLat;
+  float targetLon = steps[currentStep].targetLon;
+
   // Calculate target bearing
   float targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
   
@@ -371,9 +396,6 @@ void moveForward()
   // Update motor speeds
   updateMotorControl();
 }
-
-
-
 
 void turnLeft()
 {
@@ -397,7 +419,6 @@ void turnLeft()
   
   stopMotors();
 }
-
 
 void turnRight()
 {
