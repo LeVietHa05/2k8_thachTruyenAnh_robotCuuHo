@@ -38,7 +38,7 @@
 #define GPS_RX 16
 #define GPS_TX 17
 
-#define MAX_STEP_ALLOWED 10
+#define MAX_STEPS_ALLOWED 10
 
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
@@ -69,6 +69,9 @@ float rightIntegral = 0;
 float leftDerivative = 0;
 float rightDerivative = 0;
 
+unsigned long lastGpsUpdate = 0;
+const unsigned long GpsTimeout = 10000; // 10 seconds
+
 struct Step
 {
   float distance;
@@ -79,7 +82,7 @@ struct Step
   float targetLon;
 };
 
-Step steps[MAX_STEP_ALLOWED]; // Lưu tối đa 10 bước
+Step steps[MAX_STEPS_ALLOWED]; // Store up to 10 steps
 int currentStep = 0;
 
 void fetchRoute();
@@ -88,6 +91,12 @@ void turnLeft();
 void turnRight();
 void moveForward();
 void stopMotors();
+void calculateMotorSpeeds();
+void updateMotorControl();
+void maintainHeading(float targetYaw);
+float calculateBearing(float lat1, float lon1, float lat2, float lon2);
+bool checkGpsValid(float &lat, float &lon);
+float normalizeAngle(float angle);
 
 void setup()
 {
@@ -96,12 +105,11 @@ void setup()
   mpu.initialize();
 
   // Initialize watchdog timer (5 second timeout)
-
   esp_task_wdt_init(5, true);
   esp_task_wdt_add(NULL); // Add current task to watchdog
 
-  Serial.begin(115200);
-
+  Serial.begin(115200); // Initialize serial communication at a baud rate of 115200
+  // Initialize GPS serial communication
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
 
   WiFiManager wm;
@@ -122,13 +130,16 @@ void setup()
   Serial.println("Connected!");
   fetchRoute();
 
+  // Configure PWM channels with frequency and resolution
   ledcSetup(PWM_CHANNEL0, PWM_FREQ, PWM_RESOLUTION);
   ledcSetup(PWM_CHANNEL1, PWM_FREQ, PWM_RESOLUTION);
   ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);
   ledcSetup(PWM_CHANNEL3, PWM_FREQ, PWM_RESOLUTION);
+
+  // Attach PWM channels to motor control pins
   ledcAttachPin(MT1_L, PWM_CHANNEL0);
   ledcAttachPin(MT1_R, PWM_CHANNEL1);
-  ledcAttachPin(MT2_L, PWM_CHANNEL2);
+  ESP32Encoder::useInternalWeakPullResistors = puType::up; // Enable internal pull-up resistors for encoder pins
   ledcAttachPin(MT2_R, PWM_CHANNEL3);
 
   ESP32Encoder::useInternalWeakPullResistors = puType::up;
@@ -142,9 +153,6 @@ void setup()
   encoderLeft.setCount(0);
   encoderRight.setCount(0);
 }
-
-unsigned long lastGPSUpdate = 0;
-const unsigned long GPS_TIMEOUT = 10000; // 10 seconds
 
 void loop()
 {
@@ -177,11 +185,11 @@ void loop()
   while (gpsSerial.available())
   {
     gps.encode(gpsSerial.read());
-    lastGPSUpdate = millis();
+    lastGpsUpdate = millis();
   }
 
   // Handle GPS signal loss
-  if (millis() - lastGPSUpdate > GPS_TIMEOUT)
+  if (millis() - lastGpsUpdate > GpsTimeout)
   {
     Serial.println("Warning: GPS signal lost!");
     stopMotors();
@@ -196,16 +204,16 @@ void loop()
 
     Serial.printf("Current: %f, %f\n", lat_now, lon_now);
 
-    if (currentStep < 10)
+    if (currentStep < MAX_STEPS_ALLOWED)
     {
       Serial.printf("Instruction: %s\n", steps[currentStep].instruction.c_str());
       // Only move if we have valid GPS signal
-      if (millis() - lastGPSUpdate <= GPS_TIMEOUT)
+      if (millis() - lastGpsUpdate <= GpsTimeout)
       {
         moveAccordingToStep(steps[currentStep].type);
       }
 
-      // Giả lập đi xong đoạn đường
+      // Simulate completing the route segment
       delay(steps[currentStep].duration * 1000);
       currentStep++;
     }
@@ -213,7 +221,7 @@ void loop()
     {
       stopMotors();
       Serial.println("Route completed!");
-      while (1)
+      while (true)
         ;
     }
   }
@@ -230,7 +238,7 @@ void fetchRoute()
   while (retryCount < MAX_RETRIES && !success)
   {
     HTTPClient http;
-    http.begin(API_URL + String("?api_key=") + API_KEY);
+    http.begin(API_URL + String("?api_key=") + API_KEY + temp);
     http.setTimeout(5000); // 5 second timeout
 
     int httpCode = http.GET();
@@ -305,18 +313,22 @@ void moveAccordingToStep(int type)
     Serial.println("Arrived at destination!");
     break;
   default:
+    stopMotors();
     Serial.println("Unknown step type");
     break;
   }
 }
 
-// 📌 Hàm di chuyển robot
 void calculateMotorSpeeds()
 {
   // Calculate speed from encoder deltas
   float dt = (millis() - lastSensorUpdate) / 1000.0;
   leftSpeed = (encoderLeft.getCount() - lastLeftCount) / dt;
   rightSpeed = (encoderRight.getCount() - lastRightCount) / dt;
+
+  // Update last counts
+  lastLeftCount = encoderLeft.getCount();
+  lastRightCount = encoderRight.getCount();
 }
 
 void updateMotorControl()
@@ -352,6 +364,8 @@ void updateMotorControl()
 
 void maintainHeading(float targetYaw)
 {
+  // Normalize target yaw to be within -180 to 180 degrees
+  targetYaw = normalizeAngle(targetYaw);
   // Calculate yaw error
   float yawError = targetYaw - yaw;
 
@@ -363,8 +377,15 @@ void maintainHeading(float targetYaw)
   ledcWrite(PWM_CHANNEL2, constrain(255 - correction, 0, 255));
 }
 
+// 📌 Tính toán góc giữa 2 điểm GPS
 float calculateBearing(float lat1, float lon1, float lat2, float lon2)
 {
+  // Check if latitude and longitude values are within valid ranges
+  if (checkGpsValid(lat1, lon1) || checkGpsValid(lat2, lon2))
+  {
+    Serial.println("Invalid latitude or longitude values");
+    return 0; // Return 0 or handle error as needed
+  }
   float dLon = radians(lon2 - lon1);
   lat1 = radians(lat1);
   lat2 = radians(lat2);
@@ -374,6 +395,7 @@ float calculateBearing(float lat1, float lon1, float lat2, float lon2)
   return degrees(atan2(y, x));
 }
 
+// 📌 Di chuyển robot về phía trước
 void moveForward()
 {
   calculateMotorSpeeds();
@@ -386,6 +408,13 @@ void moveForward()
   float targetLat = steps[currentStep].targetLat;
   float targetLon = steps[currentStep].targetLon;
 
+  // Check if GPS coordinates are valid
+  if (checkGpsValid(currentLat, currentLon) && checkGpsValid(targetLat, targetLon))
+  {
+    Serial.println("Invalid GPS coordinates");
+    return;
+  }
+
   // Calculate target bearing
   float targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
 
@@ -396,10 +425,13 @@ void moveForward()
   updateMotorControl();
 }
 
+// 📌 Quay trái
 void turnLeft()
 {
   // Set target yaw 90 degrees left
   float targetYaw = yaw - 90;
+
+  targetYaw = normalizeAngle(targetYaw);
 
   // Turn until target yaw is reached
   while (abs(yaw - targetYaw) > 2)
@@ -424,6 +456,8 @@ void turnRight()
 {
   // Set target yaw 90 degrees right
   float targetYaw = yaw + 90;
+
+  targetYaw = normalizeAngle(targetYaw);
 
   // Turn until target yaw is reached
   while (abs(yaw - targetYaw) > 2)
@@ -450,4 +484,31 @@ void stopMotors()
   ledcWrite(PWM_CHANNEL1, 0);
   ledcWrite(PWM_CHANNEL2, 0);
   ledcWrite(PWM_CHANNEL3, 0);
+}
+
+bool checkGpsValid(float &lat, float &lon)
+{
+  if (lat == 0.0 && lon == 0.0)
+  {
+    Serial.println("Invalid GPS coordinates");
+    return false;
+  }
+  else if (lat < -90 || lat > 90 || lon < -180 || lon > 180)
+  {
+    Serial.println("Invalid latitude or longitude values");
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+
+float normalizeAngle(float angle)
+{
+  while (angle > 180)
+    angle -= 360;
+  while (angle < -180)
+    angle += 360;
+  return angle;
 }
