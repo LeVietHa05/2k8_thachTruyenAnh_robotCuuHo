@@ -94,7 +94,7 @@ void setup()
   // Initialize I2C for MPU6050
   Wire.begin(MPU6050_SDA, MPU6050_SCL);
   mpu.initialize();
-  
+
   // Initialize watchdog timer (5 second timeout)
 
   esp_task_wdt_init(5, true);
@@ -152,11 +152,11 @@ void loop()
   int16_t ax, ay, az;
   int16_t gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-  
+
   // Calculate yaw from gyro data
   float dt = (millis() - lastSensorUpdate) / 1000.0;
   yaw += gz / 131.0 * dt; // 131 LSB/degree/sec
-  
+
   // Read and process encoder data
   int64_t leftPos = encoderLeft.getCount();
   int64_t rightPos = encoderRight.getCount();
@@ -169,7 +169,6 @@ void loop()
   lastRightCount = rightPos;
   lastSensorUpdate = millis();
 
-  
   // Reset watchdog timer
 
   esp_task_wdt_reset();
@@ -325,25 +324,25 @@ void updateMotorControl()
   // Calculate errors
   float leftTarget = 255; // Target speed
   float rightTarget = 255;
-  
+
   float leftPrevError = leftError;
   float rightPrevError = rightError;
-  
+
   leftError = leftTarget - leftSpeed;
   rightError = rightTarget - rightSpeed;
-  
+
   // Calculate integral terms
   leftIntegral += leftError;
   rightIntegral += rightError;
-  
+
   // Calculate derivative terms
   leftDerivative = leftError - leftPrevError;
   rightDerivative = rightError - rightPrevError;
-  
+
   // Calculate PID outputs
   float leftOutput = Kp * leftError + Ki * leftIntegral + Kd * leftDerivative;
   float rightOutput = Kp * rightError + Ki * rightIntegral + Kd * rightDerivative;
-  
+
   // Apply motor control
   ledcWrite(PWM_CHANNEL0, constrain(leftOutput, 0, 255));
   ledcWrite(PWM_CHANNEL1, 0);
@@ -355,10 +354,10 @@ void maintainHeading(float targetYaw)
 {
   // Calculate yaw error
   float yawError = targetYaw - yaw;
-  
+
   // Simple P controller for yaw correction
   float correction = yawError * 0.5; // Adjust gain as needed
-  
+
   // Apply correction to motors
   ledcWrite(PWM_CHANNEL0, constrain(255 + correction, 0, 255));
   ledcWrite(PWM_CHANNEL2, constrain(255 - correction, 0, 255));
@@ -369,7 +368,7 @@ float calculateBearing(float lat1, float lon1, float lat2, float lon2)
   float dLon = radians(lon2 - lon1);
   lat1 = radians(lat1);
   lat2 = radians(lat2);
-  
+
   float y = sin(dLon) * cos(lat2);
   float x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
   return degrees(atan2(y, x));
@@ -378,21 +377,21 @@ float calculateBearing(float lat1, float lon1, float lat2, float lon2)
 void moveForward()
 {
   calculateMotorSpeeds();
-  
+
   // Get current GPS position
   float currentLat = gps.location.lat();
   float currentLon = gps.location.lng();
-  
+
   // Get next waypoint from steps
   float targetLat = steps[currentStep].targetLat;
   float targetLon = steps[currentStep].targetLon;
 
   // Calculate target bearing
   float targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
-  
+
   // Maintain heading towards waypoint
   maintainHeading(targetBearing);
-  
+
   // Update motor speeds
   updateMotorControl();
 }
@@ -401,14 +400,15 @@ void turnLeft()
 {
   // Set target yaw 90 degrees left
   float targetYaw = yaw - 90;
-  
+
   // Turn until target yaw is reached
-  while (abs(yaw - targetYaw) > 2) { // 2 degree tolerance
+  while (abs(yaw - targetYaw) > 2)
+  { // 2 degree tolerance
     ledcWrite(PWM_CHANNEL0, 100);
     ledcWrite(PWM_CHANNEL1, 0);
     ledcWrite(PWM_CHANNEL2, 255);
     ledcWrite(PWM_CHANNEL3, 0);
-    
+
     // Update yaw reading
     int16_t ax, ay, az, gx, gy, gz;
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
@@ -416,7 +416,7 @@ void turnLeft()
     yaw += gz / 131.0 * dt;
     lastSensorUpdate = millis();
   }
-  
+
   stopMotors();
 }
 
@@ -424,14 +424,15 @@ void turnRight()
 {
   // Set target yaw 90 degrees right
   float targetYaw = yaw + 90;
-  
+
   // Turn until target yaw is reached
-  while (abs(yaw - targetYaw) > 2) { // 2 degree tolerance
+  while (abs(yaw - targetYaw) > 2)
+  { // 2 degree tolerance
     ledcWrite(PWM_CHANNEL0, 255);
     ledcWrite(PWM_CHANNEL1, 0);
     ledcWrite(PWM_CHANNEL2, 100);
     ledcWrite(PWM_CHANNEL3, 0);
-    
+
     // Update yaw reading
     int16_t ax, ay, az, gx, gy, gz;
     mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
@@ -439,7 +440,7 @@ void turnRight()
     yaw += gz / 131.0 * dt;
     lastSensorUpdate = millis();
   }
-  
+
   stopMotors();
 }
 
