@@ -38,7 +38,7 @@
 #define GPS_RX 16
 #define GPS_TX 17
 
-#define MAX_STEPS_ALLOWED 10
+#define MAX_STEPS_ALLOWED 20
 
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
@@ -434,7 +434,7 @@ void turnLeft()
   targetYaw = normalizeAngle(targetYaw);
 
   // Turn until target yaw is reached
-  while (abs(yaw - targetYaw) > 2)
+  while (abs(yaw - targetYaw) > 5)
   { // 2 degree tolerance
     ledcWrite(PWM_CHANNEL0, 100);
     ledcWrite(PWM_CHANNEL1, 0);
@@ -460,7 +460,7 @@ void turnRight()
   targetYaw = normalizeAngle(targetYaw);
 
   // Turn until target yaw is reached
-  while (abs(yaw - targetYaw) > 2)
+  while (abs(yaw - targetYaw) > 5)
   { // 2 degree tolerance
     ledcWrite(PWM_CHANNEL0, 255);
     ledcWrite(PWM_CHANNEL1, 0);
