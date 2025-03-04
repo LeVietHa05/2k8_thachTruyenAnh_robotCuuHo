@@ -114,7 +114,7 @@ void setup()
   ledcAttachPin(MT1_R, PWM_CHANNEL1);
   ledcAttachPin(MT2_L, PWM_CHANNEL2);
   ledcAttachPin(MT2_R, PWM_CHANNEL3);
-  
+
   ESP32Encoder::useInternalWeakPullResistors = puType::up; // Enable internal pull-up resistors for encoder pins
 
   encoderLeft.attachHalfQuad(ENC_L_A, ENC_L_B);
@@ -141,7 +141,6 @@ void loop()
   // Read and process encoder data
   int64_t leftPos = encoderLeft.getCount();
   int64_t rightPos = encoderRight.getCount();
-
 
   // Update last values
   lastLeftCount = leftPos;
