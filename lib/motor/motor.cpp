@@ -1,27 +1,38 @@
 // Motor.cpp
 #include "Motor.h"
 
-Motor::Motor(int pwmR, int pwmL)
+Motor::Motor(int pwmR, int pwmL, double Kp, double Ki, double Kd)
+    : pwmRPin(pwmR), pwmLPin(pwmL), Kp(Kp), Ki(Ki), Kd(Kd),
+      pid(&input, &output, &setpoint, Kp, Ki, Kd, DIRECT)
 {
-    pwmRPin = pwmR;
-    pwmLPin = pwmL;
-    pinMode(pwmRPin, OUTPUT);
-    pinMode(pwmLPin, OUTPUT);
-    stop();
+    pid.SetMode(AUTOMATIC);
+    pid.SetOutputLimits(0, 255); // Chỉ từ 0-255
 }
 
-void Motor::run(int speed)
+void Motor::setTargetSpeed(double speed)
 {
-    speed = constrain(speed, -255, 255);
-    if (speed > 0)
+    setpoint = speed;
+}
+
+void Motor::updateSpeed(double measuredSpeed)
+{
+    input = abs(measuredSpeed);
+    pid.Compute();
+    run();
+}
+
+void Motor::run()
+{
+    int pwmValue = constrain(output, 0, 255);
+    if (setpoint > 0)
     {
-        analogWrite(pwmRPin, speed);
+        analogWrite(pwmRPin, pwmValue);
         analogWrite(pwmLPin, 0);
     }
-    else if (speed < 0)
+    else if (setpoint < 0)
     {
         analogWrite(pwmRPin, 0);
-        analogWrite(pwmLPin, speed);
+        analogWrite(pwmLPin, pwmValue);
     }
     else
     {
