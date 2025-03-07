@@ -2,14 +2,16 @@
 #include <Wire.h>
 #include <MPU6050.h>
 #include <ESP32Encoder.h>
+#include <SimpleKalmanFilter.h>
 
-#define PULSES_PER_REV 400
-#define WHEEL_DIAMETER_MM 100
+#define PULSES_PER_REV 400    // encoder pulses per revolution
+#define WHEEL_DIAMETER_MM 100 // wheel diameter in mm
 #define MM_PER_PULSE (3.14159 * WHEEL_DIAMETER_MM / PULSES_PER_REV)
 
 MPU6050 mpu;
 ESP32Encoder leftEncoder;
 ESP32Encoder rightEncoder;
+SimpleKalmanFilter kalmanFilter(2, 2, 0.01);
 
 Robot::Robot(double Kp, double Ki, double Kd)
     : leftMotor(0, 0, Kp, Ki, Kd), rightMotor(0, 0, Kp, Ki, Kd)
@@ -25,7 +27,7 @@ void Robot::attachMotors(int pwmL_R, int pwmL_L, int pwmR_R, int pwmR_L)
 
 void Robot::attachEncoders(int leftEncA, int leftEncB, int rightEncA, int rightEncB)
 {
-    ESP32Encoder::useInternalWeakPullResistors = UP;
+    ESP32Encoder::useInternalWeakPullResistors = puType::up;
     leftEncoder.attachHalfQuad(leftEncA, leftEncB);
     rightEncoder.attachHalfQuad(rightEncA, rightEncB);
     leftEncoder.clearCount();
@@ -38,6 +40,7 @@ void Robot::resetEncoders()
     rightEncoder.clearCount();
 }
 
+//return distance in mm
 double Robot::getDistanceTraveled()
 {
     return ((leftEncoder.getCount() + rightEncoder.getCount()) / 2.0) * MM_PER_PULSE;
@@ -59,6 +62,27 @@ void Robot::getIMUData(float &ax, float &ay, float &az, float &gx, float &gy, fl
     gx = gx_raw / 131.0;
     gy = gy_raw / 131.0;
     gz = gz_raw / 131.0;
+}
+
+//
+float Robot::getFilteredAngle()
+{
+    int16_t gx_raw, gy_raw, gz_raw;
+    mpu.getRotation(&gx_raw, &gy_raw, &gz_raw);
+    float gz = gz_raw / 131.0;
+    return kalmanFilter.updateEstimate(gz);
+}
+
+float Robot::getRawAngle()
+{
+    int16_t gx_raw, gy_raw, gz_raw;
+    mpu.getRotation(&gx_raw, &gy_raw, &gz_raw);
+    return gz_raw / 131.0;
+}
+
+float Robot::getCurrentAngle()
+{
+    return kalmanFilter.getCurrentState();
 }
 
 void Robot::moveForward(double speed)

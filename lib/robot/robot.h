@@ -16,6 +16,9 @@ public:
     void resetEncoders();
     double getDistanceTraveled();
     void getIMUData(float &ax, float &ay, float &az, float &gx, float &gy, float &gz);
+    float getFilteredAngle();
+    float getRawAngle();
+    float getCurrentAngle();
     void moveForward(double speed);
     void moveBackward(double speed);
     void turnLeft(double speed);
