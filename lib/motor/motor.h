@@ -13,8 +13,9 @@ private:
     double setpoint, input, output;
     double Kp, Ki, Kd;
     PID pid;
-    const int PWM_FREQ = 5000;
-    const int PWM_RESOLUTION = 8;
+    int PWM_FREQ = 5000;
+    int PWM_RESOLUTION = 8;
+    int channelR, channelL;
     int find_free_ledc_channel();
 
 public:

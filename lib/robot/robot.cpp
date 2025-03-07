@@ -2,7 +2,6 @@
 #include <Wire.h>
 #include <MPU6050.h>
 #include <ESP32Encoder.h>
-#include <SimpleKalmanFilter.h>
 
 #define PULSES_PER_REV 400    // encoder pulses per revolution
 #define WHEEL_DIAMETER_MM 100 // wheel diameter in mm
@@ -11,20 +10,28 @@
 MPU6050 mpu;
 ESP32Encoder leftEncoder;
 ESP32Encoder rightEncoder;
-SimpleKalmanFilter kalmanFilter(2, 2, 0.01);
 
-Robot::Robot(double Kp, double Ki, double Kd)
-    : leftMotor(0, 0, Kp, Ki, Kd), rightMotor(0, 0, Kp, Ki, Kd)
+// Constructor
+Robot::Robot(double Kp, double Ki, double Ke)
+    : Kp(Kp), Ki(Ki), Ke(Ke), kalmanFilter(2, 2, 0.01)
 {
-    // Ban đầu chưa gán chân PWM, cần gọi attachMotors()
 }
 
+// Destructor
+Robot::~Robot()
+{
+    delete leftMotor;
+    delete rightMotor;
+}
+
+// Attach motors to the robot
 void Robot::attachMotors(int pwmL_R, int pwmL_L, int pwmR_R, int pwmR_L)
 {
-    leftMotor = Motor(pwmL_R, pwmL_L, Kp, Ki, Kd);
-    rightMotor = Motor(pwmR_R, pwmR_L, Kp, Ki, Kd);
+    leftMotor =new  Motor(pwmL_R, pwmL_L, this->Kp, this->Ki, this->Ke);
+    rightMotor =new  Motor(pwmR_R, pwmR_L, this->Kp, this->Ki, this->Ke);
 }
 
+// Attach encoders to the robot
 void Robot::attachEncoders(int leftEncA, int leftEncB, int rightEncA, int rightEncB)
 {
     ESP32Encoder::useInternalWeakPullResistors = puType::up;
@@ -34,24 +41,28 @@ void Robot::attachEncoders(int leftEncA, int leftEncB, int rightEncA, int rightE
     rightEncoder.clearCount();
 }
 
+// Reset encoders
 void Robot::resetEncoders()
 {
     leftEncoder.clearCount();
     rightEncoder.clearCount();
 }
 
-//return distance in mm
+// return distance in mm
 double Robot::getDistanceTraveled()
 {
     return ((leftEncoder.getCount() + rightEncoder.getCount()) / 2.0) * MM_PER_PULSE;
 }
 
+
+// Initialize IMU
 void Robot::initIMU()
 {
     Wire.begin();
     mpu.initialize();
 }
 
+// Get IMU data
 void Robot::getIMUData(float &ax, float &ay, float &az, float &gx, float &gy, float &gz)
 {
     int16_t ax_raw, ay_raw, az_raw, gx_raw, gy_raw, gz_raw;
@@ -64,7 +75,7 @@ void Robot::getIMUData(float &ax, float &ay, float &az, float &gx, float &gy, fl
     gz = gz_raw / 131.0;
 }
 
-//
+// Get filtered angle
 float Robot::getFilteredAngle()
 {
     int16_t gx_raw, gy_raw, gz_raw;
@@ -73,6 +84,7 @@ float Robot::getFilteredAngle()
     return kalmanFilter.updateEstimate(gz);
 }
 
+// Get raw angle
 float Robot::getRawAngle()
 {
     int16_t gx_raw, gy_raw, gz_raw;
@@ -80,37 +92,37 @@ float Robot::getRawAngle()
     return gz_raw / 131.0;
 }
 
-float Robot::getCurrentAngle()
-{
-    return kalmanFilter.getCurrentState();
-}
-
+// Move forward
 void Robot::moveForward(double speed)
 {
-    leftMotor.setTargetSpeed(speed);
-    rightMotor.setTargetSpeed(speed);
+    leftMotor->setTargetSpeed(speed);
+    rightMotor->setTargetSpeed(speed);
 }
 
+// Move backward
 void Robot::moveBackward(double speed)
 {
-    leftMotor.setTargetSpeed(-speed);
-    rightMotor.setTargetSpeed(-speed);
+    leftMotor->setTargetSpeed(-speed);
+    rightMotor->setTargetSpeed(-speed);
 }
 
+// Turn left
 void Robot::turnLeft(double speed)
 {
-    leftMotor.setTargetSpeed(-speed);
-    rightMotor.setTargetSpeed(speed);
+    leftMotor->setTargetSpeed(-speed);
+    rightMotor->setTargetSpeed(speed);
 }
 
+// Turn right
 void Robot::turnRight(double speed)
 {
-    leftMotor.setTargetSpeed(speed);
-    rightMotor.setTargetSpeed(-speed);
+    leftMotor->setTargetSpeed(speed);
+    rightMotor->setTargetSpeed(-speed);
 }
 
+// Stop
 void Robot::stop()
 {
-    leftMotor.stop();
-    rightMotor.stop();
+    leftMotor->stop();
+    rightMotor->stop();
 }

@@ -7,25 +7,25 @@ Motor::Motor(int pwmR, int pwmL, double Kp, double Ki, double Kd)
 {
     pid.SetMode(AUTOMATIC);
     pid.SetOutputLimits(0, 255); // Chỉ từ 0-255
-    int channel = find_free_ledc_channel();
-    if (channel == -1)
+    channelR = find_free_ledc_channel();
+    if (channelR == -1)
     {
         Serial.println("No free LEDC channel found");
     }
     else
     {
-        ledcSetup(channel, PWM_FREQ, PWM_RESOLUTION);
-        ledcAttachPin(pwmRPin, channel);
+        ledcSetup(channelR, PWM_FREQ, PWM_RESOLUTION);
+        ledcAttachPin(pwmRPin, channelR);
     }
-    channel = find_free_ledc_channel();
-    if (channel == -1)
+    channelL = find_free_ledc_channel();
+    if (channelL == -1)
     {
         Serial.println("No free LEDC channel found");
     }
     else
     {
-        ledcSetup(channel, PWM_FREQ, PWM_RESOLUTION);
-        ledcAttachPin(pwmLPin, channel);
+        ledcSetup(channelL, PWM_FREQ, PWM_RESOLUTION);
+        ledcAttachPin(pwmLPin, channelL);
     }
 }
 
@@ -58,13 +58,13 @@ void Motor::run()
     int pwmValue = constrain(output, 0, 255);
     if (setpoint > 0)
     {
-        ledcWrite(pwmRPin, pwmValue);
-        ledcWrite(pwmLPin, 0);
+        ledcWrite(channelR, pwmValue);
+        ledcWrite(channelL, 0);
     }
     else if (setpoint < 0)
     {
-        ledcWrite(pwmRPin, 0);
-        ledcWrite(pwmLPin, pwmValue);
+        ledcWrite(channelR, 0);
+        ledcWrite(channelL, pwmValue);
     }
     else
     {
@@ -74,6 +74,6 @@ void Motor::run()
 
 void Motor::stop()
 {
-    ledcWrite(pwmRPin, 0);
-    ledcWrite(pwmLPin, 0);
+    ledcWrite(channelR, 0);
+    ledcWrite(channelL, 0);
 }

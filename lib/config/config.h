@@ -32,8 +32,6 @@ extern Step steps[MAX_STEPS_ALLOWED]; // Declare as extern
 #define PWM_CHANNEL1 1
 #define PWM_CHANNEL2 2
 #define PWM_CHANNEL3 3
-#define PWM_FREQ 5000
-#define PWM_RESOLUTION 8
 
 #define GPS_RX 16
 #define GPS_TX 17
