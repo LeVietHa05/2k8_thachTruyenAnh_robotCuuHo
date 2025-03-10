@@ -18,7 +18,7 @@ bool fetchRoute(const char *host, const char *apiKey, float startLat, float star
                  "&start=" + String(startLon, 6) + "," + String(startLat, 6) +
                  "&end=" + String(endLon, 6) + "," + String(endLat, 6) +
                  "&format=json";
-                 
+
     Serial.println("Requesting: " + url);
 
     client.print(String("GET ") + url + " HTTP/1.1\r\n" +
@@ -62,7 +62,8 @@ bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount)
     DeserializationError error = deserializeJson(doc, json);
     if (error)
     {
-        Serial.println("Failed to parse JSON");
+        Serial.print("JSON parsing failed: ");
+        Serial.println(error.c_str());
         return false;
     }
 
@@ -73,30 +74,75 @@ bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount)
         Serial.println("No features found in GeoJSON");
         return false;
     }
+
     JsonObject properties = features[0]["properties"];
-    JsonArray stepsArray = properties["segments"][0]["steps"];
+    if (properties.isNull())
+    {
+        Serial.println("No properties found in JSON");
+        return false;
+    }
+
+    JsonArray segments = properties["segments"];
+    if (segments.isNull() || segments.size() == 0)
+    {
+        Serial.println("No segments found in JSON");
+        return false;
+    }
+
+    JsonArray stepsArray = segments[0]["steps"];
+    if (stepsArray.isNull())
+    {
+        Serial.println("No steps found in JSON");
+        return false;
+    }
+
     JsonArray coordinates = features[0]["geometry"]["coordinates"];
+    if (coordinates.isNull() || coordinates.size() == 0)
+    {
+        Serial.println("No coordinates found in JSON");
+        return false;
+    }
 
     stepCount = 0; // Reset step count
 
     for (JsonObject step : stepsArray)
     {
-        int startIdx = step["way_points"][0];
-        int endIdx = step["way_points"][1];
+        if (stepCount >= MAX_STEPS_ALLOWED)
+        {
+            Serial.println("Warning: Maximum steps exceeded, truncating route");
+            break;
+        }
+
+        JsonArray wayPoints = step["way_points"];
+        if (wayPoints.isNull() || wayPoints.size() < 2)
+        {
+            continue; // Skip invalid steps
+        }
+
+        int startIdx = wayPoints[0];
+        int endIdx = wayPoints[1];
+
+        if (endIdx >= coordinates.size())
+        {
+            Serial.println("Warning: Invalid coordinate index");
+            continue;
+        }
+
+        float longitude = coordinates[endIdx][0];
+        float latitude = coordinates[endIdx][1];
 
         steps[stepCount] = {
             step["distance"],
             step["duration"],
             step["type"],
             step["instruction"].as<String>(),
-            coordinates[endIdx][1], // Latitude
-            coordinates[endIdx][0]  // Longitude
-        };
+            latitude,
+            longitude};
+
         stepCount++;
-        if (stepCount >= MAX_STEPS_ALLOWED)
-            break;
     }
-    return true; // Successfully extracted steps
+
+    return stepCount > 0; // Successfully extracted at least one step
 }
 
 String readChunkedResponse(WiFiClientSecure &client)
