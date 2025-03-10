@@ -2,7 +2,7 @@
 #include "get_data.h"
 
 // 📌 Lấy dữ liệu tuyến đường từ API
-bool fetchRoute(const char *host, const char *apiKey)
+bool fetchRoute(const char *host, const char *apiKey, float startLat, float startLon, float endLat, float endLon)
 {
     WiFiClientSecure client;
     client.setInsecure();
@@ -14,14 +14,17 @@ bool fetchRoute(const char *host, const char *apiKey)
         return false;
     }
 
-    String url = "/v2/directions/driving-car?api_key=" + String(apiKey) + "&start=8.681495,49.41461&end=8.687872,49.420318&format=json";
+    String url = "/v2/directions/driving-car?api_key=" + String(apiKey) +
+                 "&start=" + String(startLon, 6) + "," + String(startLat, 6) +
+                 "&end=" + String(endLon, 6) + "," + String(endLat, 6) +
+                 "&format=json";
+                 
     Serial.println("Requesting: " + url);
 
     client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                  "Host: " + host + "\r\n" +
                  "Connection: close\r\n\r\n");
 
-    String payload;
     while (client.connected() || client.available())
     {
         if (client.available())
@@ -31,15 +34,14 @@ bool fetchRoute(const char *host, const char *apiKey)
                 break;
         }
     }
-    while (client.available())
-    {
-        payload += client.readString();
-    }
-    Serial.println("Done getting response");
+    String payload = readChunkedResponse(client);
     client.stop(); // Close the connection
 
+    Serial.println("Done getting response");
+
     int stepCount = 0;
-    if (!extractStepsFromGeoJSON(payload.c_str(), steps, stepCount)) {
+    if (!extractStepsFromGeoJSON(payload.c_str(), steps, stepCount))
+    {
         Serial.println("Failed to extract steps from GeoJSON");
         return false;
     }
@@ -58,12 +60,19 @@ bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount)
 {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json);
-    if (error) {
+    if (error)
+    {
         Serial.println("Failed to parse JSON");
         return false;
     }
 
     JsonArray features = doc["features"];
+    // check null or empty
+    if (features.isNull() || features.size() == 0)
+    {
+        Serial.println("No features found in GeoJSON");
+        return false;
+    }
     JsonObject properties = features[0]["properties"];
     JsonArray stepsArray = properties["segments"][0]["steps"];
     JsonArray coordinates = features[0]["geometry"]["coordinates"];
@@ -84,6 +93,29 @@ bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount)
             coordinates[endIdx][0]  // Longitude
         };
         stepCount++;
+        if (stepCount >= MAX_STEPS_ALLOWED)
+            break;
     }
     return true; // Successfully extracted steps
+}
+
+String readChunkedResponse(WiFiClientSecure &client)
+{
+    String payload = "";
+    while (client.available())
+    {
+        String chunkSizeStr = client.readStringUntil('\n');
+        int chunkSize = strtol(chunkSizeStr.c_str(), NULL, 16);
+        if (chunkSize <= 0)
+            break;
+        while (chunkSize > 0)
+        {
+            char c = client.read();
+            payload += c;
+            chunkSize--;
+        }
+        client.read(); // Read the trailing '\r'
+        client.read(); // Read the trailing '\n'
+    }
+    return payload;
 }

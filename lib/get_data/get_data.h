@@ -10,7 +10,8 @@
 
 #include "config.h" // Include config after step.h
 
-bool fetchRoute(const char *host, const char *apiKey);
+bool fetchRoute(const char *host, const char *apiKey, float startLat, float startLon, float endLat, float endLon);
 bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount);
+String readChunkedResponse(WiFiClientSecure &client);
 
 #endif // GET_DATA_H
