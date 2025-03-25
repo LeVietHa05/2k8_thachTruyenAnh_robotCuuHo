@@ -122,7 +122,7 @@ float Robot::getFilteredAngle()
     // Lấy giá trị góc từ bộ lọc
     float yaw = filter.getYaw();
     // Chuyển đổi góc từ -180 đến 180 thành -900 đến 900 (khong hieu vi sao can phai lam nhu nay, nhung khong lam thi no khong chuan)
-    float yaw = (yaw - 180) * 25.714f;
+    yaw = (yaw - 180) * 25.714f;
     return yaw;
 }
 

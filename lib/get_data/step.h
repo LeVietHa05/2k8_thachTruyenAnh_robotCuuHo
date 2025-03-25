@@ -4,11 +4,11 @@
 typedef struct Step
 {
     float distance;
-    float duration;
     int type;
-    String instruction;
     float targetLat;
     float targetLon;
+    float startLat;
+    float startLon;
 } Step;
 
 #endif // STEP_H

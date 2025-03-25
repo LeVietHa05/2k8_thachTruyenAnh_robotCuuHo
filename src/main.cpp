@@ -42,7 +42,6 @@ float targetLon = 0.0;
 float currentHeading = 0.0;
 bool routeLoaded = false;
 
-void moveAccordingToStep(String instruction);
 void maintainHeading(float targetYaw, double speed);
 bool checkGpsValid(float &lat, float &lon);
 float normalizeAngle(float angle);
@@ -50,6 +49,7 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2);
 float calculateBearing(float lat1, float lon1, float lat2, float lon2);
 void updateNavigation();
 void executeCurrentStep(float targetBearing, float bearingDiff);
+void updateCurLocation();
 
 void setup()
 {
@@ -99,62 +99,93 @@ void loop()
     isGpsWorking = true;
   }
 
-  // If we have valid GPS data and a route
-  if (gps.location.isValid() && routeLoaded && isGpsWorking)
+  // loop through the steps
+  for (const Step &step : steps)
   {
-    currentLat = gps.location.lat();
-    currentLon = gps.location.lng();
+    float targetBearing = 0.0f;
+    float bearingDiff = 0.0f;
+    float distance = 0.0f;
+    targetLat = step.targetLat;
+    targetLon = step.targetLon;
+    float startLat = step.startLat;
+    float startLon = step.startLon;
 
-    if (gps.course.isValid())
+    // keep turning till bearing difference is less than 5 degrees
+    // to do this: need current heading and target bearing
+    do
     {
-      currentHeading = gps.course.deg();
+      // Update GPS data again if available
+      while (gpsSerial.available() > 0)
+      {
+        gps.encode(gpsSerial.read());
+        isGpsWorking = true;
+      }
+      // if gps good
+      if (gps.location.isValid())
+      {
+        isGpsWorking = true;
+        currentLat = gps.location.lat();
+        currentLon = gps.location.lng();
+        targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
+        // Calculate distance to target using GPS
+        distance = calculateDistance(currentLat, currentLon, targetLat, targetLon); // Distance in meters
+      }
+      else
+      {
+        // or else use the default GPS data
+        isGpsWorking = false;
+        targetBearing = calculateBearing(startLat, startLon, targetLat, targetLon);
+        // fix gps distance
+        distance = step.distance; // Distance in meters
+      }
+
+      // Get the current heading using GPS or IMU
+      if (gps.course.isValid())
+      {
+        currentHeading = gps.course.deg();
+      }
+      else
+      {
+        robot->updateIMUdata();
+        currentHeading = robot->getFilteredAngle();
+      }
+      bearingDiff = targetBearing - currentHeading;
+      if (bearingDiff > 180)
+        bearingDiff -= 360;
+      if (bearingDiff < -180)
+        bearingDiff += 360;
+
+      if (bearingDiff > 0)
+      {
+        robot->turnRight(150);
+      }
+      else
+      {
+        robot->turnLeft(150);
+      }
+    } while (abs(bearingDiff) > 5);
+
+    // move forward
+    if (isGpsWorking)
+    {
+      do
+      {
+        robot->moveForward(200);
+        updateCurLocation();
+        distance = calculateDistance(currentLat, currentLon, targetLat, targetLon);
+      } while (distance > 5 && distance != -1.0f);
     }
     else
     {
-      // Use IMU for heading if GPS course is not available
-      float ax, ay, az, gx, gy, gz;
-      currentHeading = robot->getFilteredAngle();
+      do
+      {
+        robot->moveForward(200);
+      } while (robot->getDistanceTraveled() < step.distance - 5.0f);
     }
-
-    // Update navigation at regular intervals
-    if (millis() - lastNavigationUpdate > NAVIGATION_UPDATE_INTERVAL)
-    {
-      updateNavigation();
-      lastNavigationUpdate = millis();
-    }
-  }
-  if (!isGpsWorking)
-  {
-    // GPS signal lost, stop robot
-    if (TESTING)
-    {
-    }
-    else
-    {
-      robot->stop();
-      Serial.println("GPS signal lost");
-    }
-  }
-}
-
-void moveAccordingToStep(String instruction)
-{
-  instruction.toLowerCase();
-  if (instruction.indexOf("left") != -1)
-  {
-    // TODO: turn left
-  }
-  else if (instruction.indexOf("right") != -1)
-  {
-    // TODO: turn right
-  }
-  else if (instruction.indexOf("straight") != -1)
-  {
-    // TODO: go straight
-  }
-  else if (instruction.indexOf("arrive") != -1)
-  {
-    // TODO: stop robot
+    // stop the robot
+    robot->stop();
+    // reset encoders to ready for next step
+    robot->resetEncoders();
   }
 }
 
@@ -181,6 +212,7 @@ void maintainHeading(float targetYaw, double speed)
   robot->stop();
 }
 
+// calculate distance between 2 GPS points in meters
 float calculateDistance(float lat1, float lon1, float lat2, float lon2)
 {
   // Convert degrees to radians
@@ -200,7 +232,7 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2)
   return radius * c;
 }
 
-// 📌 Tính toán góc giữa 2 điểm GPS
+// 📌 Tính toán góc giữa 2 điểm GPS don vi do
 float calculateBearing(float lat1, float lon1, float lat2, float lon2)
 {
   // Check if latitude and longitude values are within valid ranges
@@ -249,8 +281,6 @@ void updateNavigation()
   Serial.print(currentStepIndex + 1);
   Serial.print("/");
   Serial.print(totalSteps);
-  Serial.print(": ");
-  Serial.println(steps[currentStepIndex].instruction);
 
   Serial.print("Distance to next point: ");
   Serial.print(distance);
@@ -285,35 +315,39 @@ void updateNavigation()
 
 void executeCurrentStep(float targetBearing, float bearingDiff)
 {
-  // If we need to adjust heading by more than 20 degrees, turn first
-  if (abs(bearingDiff) > 10)
+  while (abs(bearingDiff) > 5)
   {
-    if (bearingDiff > 0)
+    // Adjust heading
+    if (bearingDiff > 5)
     {
-      // Turn right
-      Serial.println("Turning right to adjust heading");
-      robot->turnRight(150); // Adjust speed as needed
-      delay(100);            // Short turn duration
+      robot->turnRight(50);
     }
-    else
+    else if (bearingDiff < -5)
     {
-      // Turn left
-      Serial.println("Turning left to adjust heading");
-      robot->turnLeft(150); // Adjust speed as needed
-      delay(100);           // Short turn duration
+      robot->turnLeft(50);
     }
+    robot->updateIMUdata();
+    currentHeading = robot->getFilteredAngle();
+    bearingDiff = targetBearing - currentHeading;
+  }
+}
+
+// return distance in meters or -1 if GPS is not working
+void updateCurLocation()
+{
+  while (gpsSerial.available() > 0)
+  {
+    gps.encode(gpsSerial.read());
+    isGpsWorking = true;
+  }
+  if (gps.location.isValid())
+  {
+    currentLat = gps.location.lat();
+    currentLon = gps.location.lng();
   }
   else
   {
-    // Heading is close enough, move forward
-    int stepType = steps[currentStepIndex].type;
-    String instruction = steps[currentStepIndex].instruction;
-
-    // Log current action
-    Serial.print("Executing: ");
-    Serial.println(instruction);
-
-    moveAccordingToStep(instruction);
+    isGpsWorking = false;
   }
 }
 

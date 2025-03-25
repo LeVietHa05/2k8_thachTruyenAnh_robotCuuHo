@@ -51,7 +51,7 @@ bool fetchRoute(const char *host, const char *apiKey, float startLat, float star
         Serial.print("Step ");
         Serial.print(i);
         Serial.print(": ");
-        Serial.println(steps[i].instruction);
+        Serial.println(steps[i].distance);
     }
     return true;
 }
@@ -133,11 +133,12 @@ bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount)
 
         steps[stepCount] = {
             step["distance"],
-            step["duration"],
             step["type"],
-            step["instruction"].as<String>(),
-            latitude,
-            longitude};
+            targetLat : latitude,
+            targetLon : longitude,
+            startLat : coordinates[startIdx][1],
+            startLon : coordinates[startIdx][0]
+        };
 
         stepCount++;
     }
