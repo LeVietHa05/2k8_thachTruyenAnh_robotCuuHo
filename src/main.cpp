@@ -3,12 +3,10 @@
 #include <TinyGPS++.h>
 #include <HardwareSerial.h>
 #include <WiFiManager.h>
-#include <esp_task_wdt.h>
 #include <Wire.h>
-#include <MPU6050.h>
-#include <ESP32Encoder.h>
 
 #include "config.h" // Include configuration for host and API key
+#define TESTING 1
 
 // Define the variables
 const char *apiKey = "5b3ce3597851110001cf62489b1a4894dc59438fa047b32238086ce2";
@@ -17,62 +15,44 @@ Step steps[MAX_STEPS_ALLOWED]; // Define the steps array
 
 #include "get_data.h"
 
+#include "robot.h"
+
+Robot *robot; // Initialize the robot with PID constants
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 
-// MPU6050 and Encoder objects
-MPU6050 mpu;
-ESP32Encoder encoderLeft;
-ESP32Encoder encoderRight;
-
 // Variables for sensor data and motor control
 float yaw = 0;
-long lastLeftCount = 0;
-long lastRightCount = 0;
-unsigned long lastSensorUpdate = 0;
-
-// PID constants
-const float Kp = 1.0;
-const float Ki = 0.01;
-const float Kd = 0.1;
-
-// Motor control variables
-float leftSpeed = 0;
-float rightSpeed = 0;
-float leftError = 0;
-float rightError = 0;
-float leftIntegral = 0;
-float rightIntegral = 0;
-float leftDerivative = 0;
-float rightDerivative = 0;
 
 unsigned long lastGpsUpdate = 0;
 const unsigned long GpsTimeout = 10000; // 10 seconds
 
-int currentStep = 0;
+// Variables
+int currentStepIndex = 0;
+int totalSteps = 0;
+unsigned long lastNavigationUpdate = 0;
+const unsigned long NAVIGATION_UPDATE_INTERVAL = 1000; // Update navigation every 1 second
+bool isGpsWorking = false;
 
-void moveAccordingToStep(int type);
-void turnLeft();
-void turnRight();
-void moveForward();
-void stopMotors();
-void calculateMotorSpeeds();
-void updateMotorControl();
-void maintainHeading(float targetYaw);
-float calculateBearing(float lat1, float lon1, float lat2, float lon2);
+// Current position and orientation
+float currentLat = 0.0;
+float currentLon = 0.0;
+float targetLat = 0.0;
+float targetLon = 0.0;
+float currentHeading = 0.0;
+bool routeLoaded = false;
+
+void moveAccordingToStep(String instruction);
+void maintainHeading(float targetYaw, double speed);
 bool checkGpsValid(float &lat, float &lon);
 float normalizeAngle(float angle);
+float calculateDistance(float lat1, float lon1, float lat2, float lon2);
+float calculateBearing(float lat1, float lon1, float lat2, float lon2);
+void updateNavigation();
+void executeCurrentStep(float targetBearing, float bearingDiff);
 
 void setup()
 {
-  // Initialize I2C for MPU6050
-  Wire.begin(MPU6050_SDA, MPU6050_SCL);
-  mpu.initialize();
-
-  // Initialize watchdog timer (5 second timeout)
-  esp_task_wdt_init(10, true);
-  esp_task_wdt_add(NULL); // Add current task to watchdog
-
   Serial.begin(115200); // Initialize serial communication at a baud rate of 115200
   // Initialize GPS serial communication
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
@@ -94,7 +74,7 @@ void setup()
   }
 
   Serial.println("Connected!");
-  if (fetchRoute(host, apiKey))
+  if (fetchRoute(host, apiKey, 21.01867661642452, 105.7985191732634, 21.01643685342504, 105.80130384889998))
   {
     Serial.println("Route fetched successfully");
   }
@@ -103,182 +83,121 @@ void setup()
     Serial.println("Failed to fetch route");
   }
 
-  // Configure PWM channels with frequency and resolution
-  ledcSetup(PWM_CHANNEL0, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL3, PWM_FREQ, PWM_RESOLUTION);
+  robot = new Robot(2.0, 1.0, 5.0);
 
-  // Attach PWM channels to motor control pins
-  ledcAttachPin(MT1_L, PWM_CHANNEL0);
-  ledcAttachPin(MT1_R, PWM_CHANNEL1);
-  ledcAttachPin(MT2_L, PWM_CHANNEL2);
-  ledcAttachPin(MT2_R, PWM_CHANNEL3);
-
-  ESP32Encoder::useInternalWeakPullResistors = puType::up; // Enable internal pull-up resistors for encoder pins
-
-  encoderLeft.attachHalfQuad(ENC_L_A, ENC_L_B);
-  encoderRight.attachHalfQuad(ENC_R_A, ENC_R_B);
-
-  encoderLeft.clearCount();
-  encoderRight.clearCount();
-
-  encoderLeft.setCount(0);
-  encoderRight.setCount(0);
+  robot->attachMotors(MT1_R, MT1_L, MT2_R, MT2_L);
+  robot->attachEncoders(ENC_L_A, ENC_L_B, ENC_R_A, ENC_R_B);
+  robot->initIMU();
 }
 
 void loop()
 {
-  // Read and process MPU6050 data
-  int16_t ax, ay, az;
-  int16_t gx, gy, gz;
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-
-  // Calculate yaw from gyro data
-  float dt = (millis() - lastSensorUpdate) / 1000.0;
-  yaw += gz / 131.0 * dt; // 131 LSB/degree/sec
-
-  // Read and process encoder data
-  int64_t leftPos = encoderLeft.getCount();
-  int64_t rightPos = encoderRight.getCount();
-
-  // Update last values
-  lastLeftCount = leftPos;
-  lastRightCount = rightPos;
-  lastSensorUpdate = millis();
-
-  // Reset watchdog timer
-  esp_task_wdt_reset();
-
-  // Check for GPS signal
-  while (gpsSerial.available())
+  // Update GPS data
+  while (gpsSerial.available() > 0)
   {
     gps.encode(gpsSerial.read());
-    lastGpsUpdate = millis();
+    isGpsWorking = true;
   }
 
-  // Handle GPS signal loss
-  if (millis() - lastGpsUpdate > GpsTimeout)
+  // If we have valid GPS data and a route
+  if (gps.location.isValid() && routeLoaded && isGpsWorking)
   {
-    Serial.println("Warning: GPS signal lost!");
-    stopMotors();
-    return; // Skip navigation until signal is restored
-  }
+    currentLat = gps.location.lat();
+    currentLon = gps.location.lng();
 
-  if (gps.location.isUpdated())
-  {
-    float lat_now = gps.location.lat();
-    float lon_now = gps.location.lng();
-
-    Serial.printf("Current: %f, %f\n", lat_now, lon_now);
-
-    if (currentStep < MAX_STEPS_ALLOWED)
+    if (gps.course.isValid())
     {
-      Serial.printf("Instruction: %s\n", steps[currentStep].instruction.c_str());
-      // Only move if we have valid GPS signal
-      if (millis() - lastGpsUpdate <= GpsTimeout)
-      {
-        moveAccordingToStep(steps[currentStep].type);
-      }
-
-      // Simulate completing the route segment
-      delay(steps[currentStep].duration * 1000);
-      currentStep++;
+      currentHeading = gps.course.deg();
     }
     else
     {
-      stopMotors();
-      Serial.println("Route completed!");
-      while (true)
-        ;
+      // Use IMU for heading if GPS course is not available
+      float ax, ay, az, gx, gy, gz;
+      currentHeading = robot->getFilteredAngle();
+    }
+
+    // Update navigation at regular intervals
+    if (millis() - lastNavigationUpdate > NAVIGATION_UPDATE_INTERVAL)
+    {
+      updateNavigation();
+      lastNavigationUpdate = millis();
+    }
+  }
+  if (!isGpsWorking)
+  {
+    // GPS signal lost, stop robot
+    if (TESTING)
+    {
+    }
+    else
+    {
+      robot->stop();
+      Serial.println("GPS signal lost");
     }
   }
 }
 
-// 📌 Điều khiển robot theo từng loại bước
-void moveAccordingToStep(int type)
+void moveAccordingToStep(String instruction)
 {
-  switch (type)
+  instruction.toLowerCase();
+  if (instruction.indexOf("left") != -1)
   {
-  case 11:
-    moveForward();
-    Serial.println("Moving forward...");
-    break;
-  case 1:
-    turnRight();
-    Serial.println("Turning right...");
-    break;
-  case 2:
-    turnLeft();
-    Serial.println("Turning left...");
-    break;
-  case 10:
-    stopMotors();
-    Serial.println("Arrived at destination!");
-    break;
-  default:
-    stopMotors();
-    Serial.println("Unknown step type");
-    break;
+    // TODO: turn left
+  }
+  else if (instruction.indexOf("right") != -1)
+  {
+    // TODO: turn right
+  }
+  else if (instruction.indexOf("straight") != -1)
+  {
+    // TODO: go straight
+  }
+  else if (instruction.indexOf("arrive") != -1)
+  {
+    // TODO: stop robot
   }
 }
 
-void calculateMotorSpeeds()
+void maintainHeading(float targetYaw, double speed)
 {
-  // Calculate speed from encoder deltas
-  float dt = (millis() - lastSensorUpdate) / 1000.0;
-  leftSpeed = (encoderLeft.getCount() - lastLeftCount) / dt;
-  rightSpeed = (encoderRight.getCount() - lastRightCount) / dt;
-
-  // Update last counts
-  lastLeftCount = encoderLeft.getCount();
-  lastRightCount = encoderRight.getCount();
+  float currentYaw;
+  do
+  {
+    currentYaw = robot->getFilteredAngle();
+    float error = targetYaw - currentYaw;
+    if (error > 5)
+    {
+      robot->turnRight(50);
+    }
+    else if (error < -5)
+    {
+      robot->turnLeft(50);
+    }
+    else
+    {
+      robot->moveForward(speed);
+    }
+  } while (robot->getDistanceTraveled() < 1000); // 1 mét
+  robot->stop();
 }
 
-void updateMotorControl()
+float calculateDistance(float lat1, float lon1, float lat2, float lon2)
 {
-  // Calculate errors
-  float leftTarget = 255; // Target speed
-  float rightTarget = 255;
+  // Convert degrees to radians
+  float lat1Rad = lat1 * PI / 180.0;
+  float lon1Rad = lon1 * PI / 180.0;
+  float lat2Rad = lat2 * PI / 180.0;
+  float lon2Rad = lon2 * PI / 180.0;
 
-  float leftPrevError = leftError;
-  float rightPrevError = rightError;
+  // Haversine formula
+  float dlon = lon2Rad - lon1Rad;
+  float dlat = lat2Rad - lat1Rad;
+  float a = pow(sin(dlat / 2), 2) + cos(lat1Rad) * cos(lat2Rad) * pow(sin(dlon / 2), 2);
+  float c = 2 * atan2(sqrt(a), sqrt(1 - a));
 
-  leftError = leftTarget - leftSpeed;
-  rightError = rightTarget - rightSpeed;
-
-  // Calculate integral terms
-  leftIntegral += leftError;
-  rightIntegral += rightError;
-
-  // Calculate derivative terms
-  leftDerivative = leftError - leftPrevError;
-  rightDerivative = rightError - rightPrevError;
-
-  // Calculate PID outputs
-  float leftOutput = Kp * leftError + Ki * leftIntegral + Kd * leftDerivative;
-  float rightOutput = Kp * rightError + Ki * rightIntegral + Kd * rightDerivative;
-
-  // Apply motor control
-  ledcWrite(PWM_CHANNEL0, constrain(leftOutput, 0, 255));
-  ledcWrite(PWM_CHANNEL1, 0);
-  ledcWrite(PWM_CHANNEL2, constrain(rightOutput, 0, 255));
-  ledcWrite(PWM_CHANNEL3, 0);
-}
-
-void maintainHeading(float targetYaw)
-{
-  // Normalize target yaw to be within -180 to 180 degrees
-  targetYaw = normalizeAngle(targetYaw);
-  // Calculate yaw error
-  float yawError = targetYaw - yaw;
-
-  // Simple P controller for yaw correction
-  float correction = yawError * 0.5; // Adjust gain as needed
-
-  // Apply correction to motors
-  ledcWrite(PWM_CHANNEL0, constrain(255 + correction, 0, 255));
-  ledcWrite(PWM_CHANNEL2, constrain(255 - correction, 0, 255));
+  // Earth radius in meters
+  float radius = 6371000;
+  return radius * c;
 }
 
 // 📌 Tính toán góc giữa 2 điểm GPS
@@ -299,95 +218,103 @@ float calculateBearing(float lat1, float lon1, float lat2, float lon2)
   return degrees(atan2(y, x));
 }
 
-// 📌 Di chuyển robot về phía trước
-void moveForward()
+void updateNavigation()
 {
-  calculateMotorSpeeds();
-
-  // Get current GPS position
-  float currentLat = gps.location.lat();
-  float currentLon = gps.location.lng();
-
-  // Get next waypoint from steps
-  float targetLat = steps[currentStep].targetLat;
-  float targetLon = steps[currentStep].targetLon;
-
-  // Check if GPS coordinates are valid
-  if (checkGpsValid(currentLat, currentLon) && checkGpsValid(targetLat, targetLon))
+  if (currentStepIndex >= totalSteps)
   {
-    Serial.println("Invalid GPS coordinates");
+    // End of route reached
+    robot->stop();
+    Serial.println("Destination reached!");
     return;
   }
 
-  // Calculate target bearing
+  // Get current target from our step
+  targetLat = steps[currentStepIndex].targetLat;
+  targetLon = steps[currentStepIndex].targetLon;
+
+  // Calculate distance to target
+  float distance = calculateDistance(currentLat, currentLon, targetLat, targetLon);
+
+  // Calculate bearing to target
   float targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
 
-  // Maintain heading towards waypoint
-  maintainHeading(targetBearing);
+  // Calculate bearing difference (-180 to 180 degrees)
+  float bearingDiff = targetBearing - currentHeading;
+  if (bearingDiff > 180)
+    bearingDiff -= 360;
+  if (bearingDiff < -180)
+    bearingDiff += 360;
 
-  // Update motor speeds
-  updateMotorControl();
-}
+  Serial.print("Step ");
+  Serial.print(currentStepIndex + 1);
+  Serial.print("/");
+  Serial.print(totalSteps);
+  Serial.print(": ");
+  Serial.println(steps[currentStepIndex].instruction);
 
-// 📌 Quay trái
-void turnLeft()
-{
-  // Set target yaw 90 degrees left
-  float targetYaw = yaw - 90;
+  Serial.print("Distance to next point: ");
+  Serial.print(distance);
+  Serial.println(" meters");
 
-  targetYaw = normalizeAngle(targetYaw);
+  Serial.print("Bearing difference: ");
+  Serial.print(bearingDiff);
+  Serial.println(" degrees");
 
-  // Turn until target yaw is reached
-  while (abs(yaw - targetYaw) > 5)
-  { // 2 degree tolerance
-    ledcWrite(PWM_CHANNEL0, 100);
-    ledcWrite(PWM_CHANNEL1, 0);
-    ledcWrite(PWM_CHANNEL2, 255);
-    ledcWrite(PWM_CHANNEL3, 0);
+  // Execute navigation based on step type and bearing
+  executeCurrentStep(targetBearing, bearingDiff);
 
-    // Update yaw reading
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    float dt = (millis() - lastSensorUpdate) / 1000.0;
-    yaw += gz / 131.0 * dt;
-    lastSensorUpdate = millis();
+  // Check if we're close enough to target to move to next step
+  if (distance < 5.0)
+  { // Within 5 meters of target
+    currentStepIndex++;
+    Serial.println("Moving to next step");
+
+    // If this was the last step, stop the robot
+    if (currentStepIndex >= totalSteps)
+    {
+      robot->stop();
+      Serial.println("Route completed!");
+    }
   }
-
-  stopMotors();
-}
-
-void turnRight()
-{
-  // Set target yaw 90 degrees right
-  float targetYaw = yaw + 90;
-
-  targetYaw = normalizeAngle(targetYaw);
-
-  // Turn until target yaw is reached
-  while (abs(yaw - targetYaw) > 5)
-  { // 2 degree tolerance
-    ledcWrite(PWM_CHANNEL0, 255);
-    ledcWrite(PWM_CHANNEL1, 0);
-    ledcWrite(PWM_CHANNEL2, 100);
-    ledcWrite(PWM_CHANNEL3, 0);
-
-    // Update yaw reading
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    float dt = (millis() - lastSensorUpdate) / 1000.0;
-    yaw += gz / 131.0 * dt;
-    lastSensorUpdate = millis();
+  else
+  {
+    // Maintain heading
+    maintainHeading(targetBearing, 50);
   }
-
-  stopMotors();
 }
 
-void stopMotors()
+void executeCurrentStep(float targetBearing, float bearingDiff)
 {
-  ledcWrite(PWM_CHANNEL0, 0);
-  ledcWrite(PWM_CHANNEL1, 0);
-  ledcWrite(PWM_CHANNEL2, 0);
-  ledcWrite(PWM_CHANNEL3, 0);
+  // If we need to adjust heading by more than 20 degrees, turn first
+  if (abs(bearingDiff) > 10)
+  {
+    if (bearingDiff > 0)
+    {
+      // Turn right
+      Serial.println("Turning right to adjust heading");
+      robot->turnRight(150); // Adjust speed as needed
+      delay(100);            // Short turn duration
+    }
+    else
+    {
+      // Turn left
+      Serial.println("Turning left to adjust heading");
+      robot->turnLeft(150); // Adjust speed as needed
+      delay(100);           // Short turn duration
+    }
+  }
+  else
+  {
+    // Heading is close enough, move forward
+    int stepType = steps[currentStepIndex].type;
+    String instruction = steps[currentStepIndex].instruction;
+
+    // Log current action
+    Serial.print("Executing: ");
+    Serial.println(instruction);
+
+    moveAccordingToStep(instruction);
+  }
 }
 
 bool checkGpsValid(float &lat, float &lon)
