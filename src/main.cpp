@@ -72,15 +72,43 @@ void setup()
       delay(300);
     }
   }
-
   Serial.println("Connected!");
-  if (fetchRoute(host, apiKey, 21.01867661642452, 105.7985191732634, 21.01643685342504, 105.80130384889998))
+  // Update GPS data
+  updateCurLocation();
+
+  if (TESTING || !isGpsWorking)
   {
-    Serial.println("Route fetched successfully");
+    steps[0].distance = 10.0f;
+    steps[0].type = 0;
+    steps[0].targetLat = 21.01731031312228;
+    steps[0].targetLon = 105.79836476525836;
+    steps[0].startLat = 21.017901101150503;
+    steps[0].startLon = 105.79856804153376;
+
+    steps[1].distance = 12.0f;
+    steps[1].type = 0;
+    steps[1].targetLat = 21.017533048366026;
+    steps[1].targetLon = 105.7976265862394;
+    steps[1].startLat = 21.01731031312228;
+    steps[1].startLon = 105.79836476525836;
+
+    steps[2].distance = 15.0f;
+    steps[2].type = 0;
+    steps[2].targetLat = 21.017012264642755;
+    steps[2].targetLon = 105.79740932732533;
+    steps[2].startLat = 21.017533048366026;
+    steps[2].startLon = 105.7976265862394;
   }
   else
   {
-    Serial.println("Failed to fetch route");
+    if (fetchRoute(host, apiKey, 21.01867661642452, 105.7985191732634, 21.01643685342504, 105.80130384889998))
+    {
+      Serial.println("Route fetched successfully");
+    }
+    else
+    {
+      Serial.println("Failed to fetch route");
+    }
   }
 
   robot = new Robot(2.0, 1.0, 5.0);
@@ -121,7 +149,7 @@ void loop()
         isGpsWorking = true;
       }
       // if gps good
-      if (gps.location.isValid())
+      if (gps.location.isValid() && !TESTING)
       {
         isGpsWorking = true;
         currentLat = gps.location.lat();
@@ -140,7 +168,7 @@ void loop()
       }
 
       // Get the current heading using GPS or IMU
-      if (gps.course.isValid())
+      if (gps.course.isValid() && !TESTING)
       {
         currentHeading = gps.course.deg();
       }
@@ -149,24 +177,26 @@ void loop()
         robot->updateIMUdata();
         currentHeading = robot->getFilteredAngle();
       }
+
+      // Calculate bearing difference (-180 to 180 degrees)
       bearingDiff = targetBearing - currentHeading;
       if (bearingDiff > 180)
         bearingDiff -= 360;
       if (bearingDiff < -180)
         bearingDiff += 360;
-
-      if (bearingDiff > 0)
+      // Adjust heading if
+      if (bearingDiff > 5)
       {
         robot->turnRight(150);
       }
-      else
+      else if (bearingDiff < -5)
       {
         robot->turnLeft(150);
       }
     } while (abs(bearingDiff) > 5);
 
     // move forward
-    if (isGpsWorking)
+    if (isGpsWorking && !TESTING)
     {
       do
       {
@@ -180,7 +210,7 @@ void loop()
       do
       {
         robot->moveForward(200);
-      } while (robot->getDistanceTraveled() < step.distance - 5.0f);
+      } while (robot->getDistanceTraveled() < (step.distance - 1.0f) * 1000.0f);
     }
     // stop the robot
     robot->stop();
