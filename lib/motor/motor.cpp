@@ -29,16 +29,21 @@ Motor::Motor(int pwmR, int pwmL, double Kp, double Ki, double Kd)
     }
 }
 
+#define LEDC_MAX_CHANNELS 16
+
+bool ledc_used_channels[LEDC_MAX_CHANNELS] = {false};
+
 int Motor::find_free_ledc_channel()
 {
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < LEDC_MAX_CHANNELS; i++)
     {
-        if (!ledcReadFreq(i))
+        if (!ledc_used_channels[i])
         {
+            ledc_used_channels[i] = true; // Mark as used
             return i;
         }
     }
-    return -1;
+    return -1; // No free channel found
 }
 
 void Motor::setTargetSpeed(double speed)

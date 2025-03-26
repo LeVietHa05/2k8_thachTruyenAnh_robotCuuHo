@@ -61,6 +61,7 @@ void Robot::initIMU()
 {
     Wire.begin();
     mpu.initialize();
+    calibrateIMU();
 }
 
 // Calibrate IMU
