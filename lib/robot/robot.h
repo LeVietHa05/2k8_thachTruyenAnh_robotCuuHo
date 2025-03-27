@@ -2,7 +2,6 @@
 #define ROBOT_H
 
 #include "Motor.h"
-#include <SimpleKalmanFilter.h>
 
 class Robot
 {
@@ -11,8 +10,10 @@ private:
     int16_t gx_offset = 0, gy_offset = 0, gz_offset = 0;
     Motor leftMotor;
     Motor rightMotor;
-    double Kp, Ki, Ke;
-    SimpleKalmanFilter kalmanFilter;
+    double Kp, Ki, Kd;
+    PID syncPID; // PID để đồng bộ tốc độ
+    double syncSetpoint, syncInput, syncOutput;
+    int offset = 0; //for leftmotor (it slower than right motor)
 
 public:
     Robot(double Kp, double Ki, double Kd);
@@ -31,6 +32,11 @@ public:
     void turnLeft(double speed);
     void turnRight(double speed);
     void stop();
+    void setOffset(int offset);
+    int getOffset();
+    void updateMotorSpeeds();
+    void debugRobot();
+    void initSyncPID(double Kp, double Ki, double Kd);
 };
 
 #endif

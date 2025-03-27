@@ -4,9 +4,10 @@
 #include <ESP32Encoder.h>
 #include <MahonyAHRS.h>
 
-#define PULSES_PER_REV 400    // encoder pulses per revolution
+#define PULSES_PER_REV 800    // encoder pulses per revolution
 #define WHEEL_DIAMETER_MM 100 // wheel diameter in mm
 #define MM_PER_PULSE (3.14159 * WHEEL_DIAMETER_MM / PULSES_PER_REV)
+#define MAX_SPEED 333 // RPM
 
 MPU6050 mpu;
 Mahony filter;
@@ -14,9 +15,12 @@ ESP32Encoder leftEncoder;
 ESP32Encoder rightEncoder;
 
 // Constructor
-Robot::Robot(double Kp, double Ki, double Ke)
-    : Kp(Kp), Ki(Ki), Ke(Ke), kalmanFilter(2, 2, 0.01)
+Robot::Robot(double Kp, double Ki, double Kd)
+    : Kp(Kp), Ki(Ki), Kd(Kd), syncPID(&syncInput, &syncOutput, &syncSetpoint, 0, 0, 0, DIRECT)
 {
+    leftMotor.beginPID(Kp, Ki, Kd);
+    rightMotor.beginPID(Kp, Ki, Kd);
+    initSyncPID(0.5, 0.0, 1.0);
 }
 
 // Destructor
@@ -136,42 +140,128 @@ float Robot::getRawAngle()
 // Move forward
 void Robot::moveForward(double speed)
 {
-    leftMotor.setTargetSpeed(speed);
-    rightMotor.setTargetSpeed(speed);
+    // spd: 0 - 100 %
+    // targetspd: 0 - 800 (pulse/s)
+    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    leftMotor.setTargetSpeed(targetSpeed + offset);
+    rightMotor.setTargetSpeed(targetSpeed);
     leftMotor.run();
     rightMotor.run();
+    updateMotorSpeeds(); // Cập nhật tốc độ
 }
 
 // Move backward
 void Robot::moveBackward(double speed)
 {
-    leftMotor.setTargetSpeed(-speed);
-    rightMotor.setTargetSpeed(-speed);
+    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    leftMotor.setTargetSpeed(-targetSpeed - offset);
+    rightMotor.setTargetSpeed(-targetSpeed);
     leftMotor.run();
     rightMotor.run();
+    updateMotorSpeeds(); // Cập nhật tốc độ
 }
 
 // Turn left
 void Robot::turnLeft(double speed)
 {
-    leftMotor.setTargetSpeed(-speed);
-    rightMotor.setTargetSpeed(speed);
+    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    leftMotor.setTargetSpeed(0);
+    rightMotor.setTargetSpeed(targetSpeed);
     leftMotor.run();
     rightMotor.run();
+    updateMotorSpeeds(); // Cập nhật tốc độ
 }
 
 // Turn right
 void Robot::turnRight(double speed)
 {
-    leftMotor.setTargetSpeed(speed);
-    rightMotor.setTargetSpeed(-speed);
+    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    leftMotor.setTargetSpeed(targetSpeed + offset);
+    rightMotor.setTargetSpeed(0);
     leftMotor.run();
     rightMotor.run();
+    updateMotorSpeeds(); // Cập nhật tốc độ
 }
 
 // Stop
 void Robot::stop()
 {
-    leftMotor.stop();
-    rightMotor.stop();
+    leftMotor.setTargetSpeed(0);
+    rightMotor.setTargetSpeed(0);
+    updateMotorSpeeds(); // Cập nhật tốc độ
+}
+
+// offset
+void Robot::setOffset(int offset)
+{
+    this->offset = offset;
+}
+
+int Robot::getOffset()
+{
+    return offset;
+}
+
+// Update motor speeds based on encoder feedback
+void Robot::updateMotorSpeeds()
+{
+    static int32_t lastLeftCount = 0;
+    static int32_t lastRightCount = 0;
+    static unsigned long lastTime = 0;
+
+    unsigned long currentTime = millis();
+    if (currentTime - lastTime >= 10)
+    { // Cập nhật mỗi 10ms
+        int32_t leftCount = leftEncoder.getCount();
+        int32_t rightCount = rightEncoder.getCount();
+
+        double deltaTime = (currentTime - lastTime) / 1000.0;
+        double leftSpeed = (leftCount - lastLeftCount) / deltaTime;
+        double rightSpeed = (rightCount - lastRightCount) / deltaTime;
+
+        lastLeftCount = leftCount;
+        lastRightCount = rightCount;
+        lastTime = currentTime;
+
+        // PID cấp thấp
+        leftMotor.updateSpeed(leftSpeed);
+        rightMotor.updateSpeed(rightSpeed);
+
+        // PID cấp cao để đồng bộ
+        syncInput = leftSpeed - rightSpeed; // Chênh lệch tốc độ
+        syncPID.Compute();
+        offset = syncOutput; // Điều chỉnh offset động
+
+        // Áp dụng offset
+        leftMotor.setTargetSpeed(leftMotor.getSetpoint() + offset);
+        rightMotor.setTargetSpeed(rightMotor.getSetpoint());
+
+        // Debug
+        Serial.print("Left Speed: ");
+        Serial.print(leftSpeed);
+        Serial.print(" | Right Speed: ");
+        Serial.print(rightSpeed);
+        Serial.print(" | Offset: ");
+        Serial.println(offset);
+    }
+}
+
+void Robot::debugRobot()
+{
+    Serial.print(leftEncoder.getCount());
+    Serial.print(" - ");
+    Serial.print(rightEncoder.getCount());
+    Serial.println("");
+    // leftMotor.debugMotor();
+    // Serial.print("Right motor: ");
+    // rightMotor.debugMotor();
+}
+
+void Robot::initSyncPID(double Kp, double Ki, double Kd)
+{
+    syncSetpoint = 0; // Chênh lệch tốc độ mong muốn = 0
+    syncPID.SetMode(AUTOMATIC);
+    syncPID.SetTunings(Kp, Ki, Kd);
+    syncPID.SetSampleTime(10);
+    syncPID.SetOutputLimits(-50, 50); // Giới hạn offset
 }

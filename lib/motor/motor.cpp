@@ -1,6 +1,13 @@
 // Motor.cpp
 #include "Motor.h"
 
+Motor::Motor() : pid(&input, &output, &setpoint, 0, 0, 0, DIRECT)
+{
+    setpoint = 0;
+    input = 0;
+    output = 0;
+}
+
 void Motor::begin(int pwmR, int pwmL)
 {
     pwmRPin = pwmR;
@@ -29,13 +36,13 @@ void Motor::begin(int pwmR, int pwmL)
 
 void Motor::beginPID(double Kp, double Ki, double Kd)
 {
-    // this->Kp = Kp;
-    // this->Ki = Ki;
-    // this->Kd = Kd;
-    // pid(input, output, setpoint, Kp, Ki, Kd, DIRECT);
-    // pid.SetTunings(Kp, Ki, Kd);
-    // pid.SetSampleTime(10); // 10ms
-    // pid.SetOutputLimits(-255, 255);
+    this->Kp = Kp;
+    this->Ki = Ki;
+    this->Kd = Kd;
+    pid.SetMode(AUTOMATIC); // Bật chế độ tự động
+    pid.SetTunings(Kp, Ki, Kd);
+    pid.SetSampleTime(10); // 10ms
+    pid.SetOutputLimits(-255, 255);
 }
 
 #define LEDC_MAX_CHANNELS 16
@@ -62,8 +69,15 @@ void Motor::setTargetSpeed(double speed)
 
 void Motor::updateSpeed(double measuredSpeed)
 {
-    input = abs(measuredSpeed);
-    // pid.Compute();
+    static double lastOutput = 0;
+    input = measuredSpeed;
+    pid.Compute();
+    double maxChange = 20;
+    if (output > lastOutput + maxChange)
+        output = lastOutput + maxChange;
+    else if (output < lastOutput - maxChange)
+        output = lastOutput - maxChange;
+    lastOutput = output;
     run();
 }
 
@@ -72,13 +86,13 @@ void Motor::run()
     int pwmValue = constrain(output, 0, 255);
     if (setpoint > 0)
     {
-        ledcWrite(channelR, setpoint);
+        ledcWrite(channelR, pwmValue);
         ledcWrite(channelL, 0);
     }
     else if (setpoint < 0)
     {
         ledcWrite(channelR, 0);
-        ledcWrite(channelL, setpoint);
+        ledcWrite(channelL, pwmValue);
     }
     else
     {
@@ -88,6 +102,26 @@ void Motor::run()
 
 void Motor::stop()
 {
-    ledcWrite(channelR, 0);
+    setTargetSpeed(0);
+}
+
+void Motor::debugMotor()
+{
+    Serial.print("Setpoint: ");
+    Serial.print(setpoint);
+    Serial.print(",");
+    Serial.print(input);
+    Serial.print(",");
+    Serial.println(output);
+}
+
+void Motor::runPWM(int pwmValue)
+{
+    ledcWrite(channelR, pwmValue);
     ledcWrite(channelL, 0);
+}
+
+double Motor::getSetpoint()
+{
+    return setpoint;
 }

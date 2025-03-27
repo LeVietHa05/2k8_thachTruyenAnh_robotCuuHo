@@ -20,11 +20,11 @@ extern Step steps[MAX_STEPS_ALLOWED]; // Declare as extern
 
 #define MT1_L 25
 #define MT1_R 26
-#define MT2_L 27
-#define MT2_R 14
+#define MT2_L 14
+#define MT2_R 27
 
-#define ENC_L_A 32
-#define ENC_L_B 33
+#define ENC_L_A 33
+#define ENC_L_B 32
 #define ENC_R_A 34
 #define ENC_R_B 35
 

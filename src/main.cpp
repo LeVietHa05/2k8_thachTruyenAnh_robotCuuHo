@@ -57,22 +57,22 @@ void setup()
   // Initialize GPS serial communication
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
 
-  WiFiManager wm;
-
-  bool res = wm.autoConnect("AutoConnectAP", "password");
-  if (!res)
-  {
-    Serial.println("Failed to connect to WiFi");
-    pinMode(LED_BUILTIN, OUTPUT);
-    while (1)
-    {
-      dw(LED_BUILTIN, HIGH);
-      delay(300);
-      dw(LED_BUILTIN, LOW);
-      delay(300);
-    }
-  }
-  Serial.println("Connected!");
+//   WiFiManager wm;
+// 
+//   bool res = wm.autoConnect("AutoConnectAP", "password");
+//   if (!res)
+//   {
+//     Serial.println("Failed to connect to WiFi");
+//     pinMode(LED_BUILTIN, OUTPUT);
+//     while (1)
+//     {
+//       dw(LED_BUILTIN, HIGH);
+//       delay(300);
+//       dw(LED_BUILTIN, LOW);
+//       delay(300);
+//     }
+//   }
+//   Serial.println("Connected!");
   // Update GPS data
   updateCurLocation();
 
@@ -114,15 +114,46 @@ void setup()
     }
   }
 
-  robot = new Robot(2.0, 1.0, 5.0);
+  robot = new Robot(0.15, 0.001, 1);
 
   robot->attachMotors(MT1_R, MT1_L, MT2_R, MT2_L);
   robot->attachEncoders(ENC_L_A, ENC_L_B, ENC_R_A, ENC_R_B);
   robot->initIMU();
+  robot->setOffset(0);
 }
 
 void loop()
 {
+  while (TESTING)
+  {
+    robot->updateMotorSpeeds();
+    robot->debugRobot();
+    robot->moveForward(10);
+    // if (Serial.available() > 0)
+    // {
+    //   char c = Serial.read();
+    //   if (c == 'w')
+    //   {
+    //     robot->moveForward(15);
+    //   }
+    //   else if (c == 's')
+    //   {
+    //     robot->moveBackward(20);
+    //   }
+    //   else if (c == 'a')
+    //   {
+    //     robot->turnLeft(10);
+    //   }
+    //   else if (c == 'd')
+    //   {
+    //     robot->turnRight(10);
+    //   }
+    //   else if (c == 'x')
+    //   {
+    //     robot->stop();
+    //   }
+    
+  }
   // Update GPS data
   while (gpsSerial.available() > 0)
   {
@@ -158,6 +189,7 @@ void loop()
     // to do this: need current heading and target bearing
     do
     {
+      robot->updateMotorSpeeds();
       // Update GPS data again if available
       while (gpsSerial.available() > 0)
       {
@@ -182,12 +214,10 @@ void loop()
         // fix gps distance
         distance = step.distance; // Distance in meters
       }
-      Serial.print("Distance to target: ");
       Serial.print(distance);
       Serial.print(" - ");
-      Serial.print("Target bearing: ");
       Serial.print(targetBearing);
-      Serial.print(" degrees - ");
+      Serial.print(" - ");
 
       // Get the current heading using GPS or IMU
       if (gps.course.isValid() && !TESTING)
@@ -199,10 +229,8 @@ void loop()
         robot->updateIMUdata();
         currentHeading = robot->getFilteredAngle();
       }
-
-      Serial.print("Current heading: ");
       Serial.print(currentHeading);
-      Serial.println(" degrees");
+      Serial.println("");
 
       // Calculate bearing difference (-180 to 180 degrees)
       bearingDiff = targetBearing - currentHeading;
@@ -213,12 +241,13 @@ void loop()
       // Adjust heading if
       if (bearingDiff > 5)
       {
-        robot->turnRight(50);
+        robot->turnRight(10);
       }
       else if (bearingDiff < -5)
       {
-        robot->turnLeft(50);
+        robot->turnLeft(10);
       }
+      delay(45);
     } while (abs(bearingDiff) > 5);
 
     // move forward
@@ -226,7 +255,9 @@ void loop()
     {
       do
       {
-        robot->moveForward(100);
+        delay(50);
+        robot->updateMotorSpeeds();
+        robot->moveForward(30);
         updateCurLocation();
         distance = calculateDistance(currentLat, currentLon, targetLat, targetLon);
       } while (distance > 5 && distance != -1.0f);
@@ -235,8 +266,12 @@ void loop()
     {
       do
       {
-        robot->moveForward(100);
-      } while (robot->getDistanceTraveled() < (step.distance - 1.0f) * 1000.0f);
+        delay(50);
+        robot->updateMotorSpeeds();
+        robot->moveForward(30);
+      }
+      while (robot->getDistanceTraveled() < (step.distance - 1.0f) * 1000.0f)
+        ;
     }
     // stop the robot
     robot->stop();
