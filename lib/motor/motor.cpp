@@ -1,12 +1,10 @@
 // Motor.cpp
 #include "Motor.h"
 
-Motor::Motor(int pwmR, int pwmL, double Kp, double Ki, double Kd)
-    : pwmRPin(pwmR), pwmLPin(pwmL), Kp(Kp), Ki(Ki), Kd(Kd),
-      pid(&input, &output, &setpoint, Kp, Ki, Kd, DIRECT)
+void Motor::begin(int pwmR, int pwmL)
 {
-    pid.SetMode(AUTOMATIC);
-    pid.SetOutputLimits(0, 255); // Chỉ từ 0-255
+    pwmRPin = pwmR;
+    pwmLPin = pwmL;
     channelR = find_free_ledc_channel();
     if (channelR == -1)
     {
@@ -27,6 +25,17 @@ Motor::Motor(int pwmR, int pwmL, double Kp, double Ki, double Kd)
         ledcSetup(channelL, PWM_FREQ, PWM_RESOLUTION);
         ledcAttachPin(pwmLPin, channelL);
     }
+}
+
+void Motor::beginPID(double Kp, double Ki, double Kd)
+{
+    // this->Kp = Kp;
+    // this->Ki = Ki;
+    // this->Kd = Kd;
+    // pid(input, output, setpoint, Kp, Ki, Kd, DIRECT);
+    // pid.SetTunings(Kp, Ki, Kd);
+    // pid.SetSampleTime(10); // 10ms
+    // pid.SetOutputLimits(-255, 255);
 }
 
 #define LEDC_MAX_CHANNELS 16
@@ -54,7 +63,7 @@ void Motor::setTargetSpeed(double speed)
 void Motor::updateSpeed(double measuredSpeed)
 {
     input = abs(measuredSpeed);
-    pid.Compute();
+    // pid.Compute();
     run();
 }
 
@@ -63,13 +72,13 @@ void Motor::run()
     int pwmValue = constrain(output, 0, 255);
     if (setpoint > 0)
     {
-        ledcWrite(channelR, pwmValue);
+        ledcWrite(channelR, setpoint);
         ledcWrite(channelL, 0);
     }
     else if (setpoint < 0)
     {
         ledcWrite(channelR, 0);
-        ledcWrite(channelL, pwmValue);
+        ledcWrite(channelL, setpoint);
     }
     else
     {

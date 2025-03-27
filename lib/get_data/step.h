@@ -3,12 +3,13 @@
 
 typedef struct Step
 {
+    byte id;
     float distance;
     int type;
-    float targetLat;
-    float targetLon;
-    float startLat;
-    float startLon;
+    double targetLat;
+    double targetLon;
+    double startLat;
+    double startLon;
 } Step;
 
 #endif // STEP_H

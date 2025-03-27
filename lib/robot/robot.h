@@ -9,8 +9,8 @@ class Robot
 private:
     int16_t ax_offset = 0, ay_offset = 0, az_offset = 0;
     int16_t gx_offset = 0, gy_offset = 0, gz_offset = 0;
-    Motor *leftMotor = nullptr;
-    Motor *rightMotor = nullptr;
+    Motor leftMotor;
+    Motor rightMotor;
     double Kp, Ki, Ke;
     SimpleKalmanFilter kalmanFilter;
 

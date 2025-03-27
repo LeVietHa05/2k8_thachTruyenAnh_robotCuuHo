@@ -35,18 +35,18 @@ const unsigned long NAVIGATION_UPDATE_INTERVAL = 1000; // Update navigation ever
 bool isGpsWorking = false;
 
 // Current position and orientation
-float currentLat = 0.0;
-float currentLon = 0.0;
-float targetLat = 0.0;
-float targetLon = 0.0;
+double currentLat = 0.0;
+double currentLon = 0.0;
+double targetLat = 0.0;
+double targetLon = 0.0;
 float currentHeading = 0.0;
 bool routeLoaded = false;
 
 void maintainHeading(float targetYaw, double speed);
-bool checkGpsValid(float &lat, float &lon);
+bool checkGpsValid(double &lat, double &lon);
 float normalizeAngle(float angle);
-float calculateDistance(float lat1, float lon1, float lat2, float lon2);
-float calculateBearing(float lat1, float lon1, float lat2, float lon2);
+float calculateDistance(double lat1, double lon1, double lat2, double lon2);
+float calculateBearing(double lat1, double lon1, double lat2, double lon2);
 void updateNavigation();
 void executeCurrentStep(float targetBearing, float bearingDiff);
 void updateCurLocation();
@@ -78,6 +78,7 @@ void setup()
 
   if (TESTING || !isGpsWorking)
   {
+    steps[0].id = 0;
     steps[0].distance = 10.0f;
     steps[0].type = 0;
     steps[0].targetLat = 21.01731031312228;
@@ -85,6 +86,7 @@ void setup()
     steps[0].startLat = 21.017901101150503;
     steps[0].startLon = 105.79856804153376;
 
+    steps[1].id = 1;
     steps[1].distance = 12.0f;
     steps[1].type = 0;
     steps[1].targetLat = 21.017533048366026;
@@ -92,6 +94,7 @@ void setup()
     steps[1].startLat = 21.01731031312228;
     steps[1].startLon = 105.79836476525836;
 
+    steps[2].id = 2;
     steps[2].distance = 15.0f;
     steps[2].type = 0;
     steps[2].targetLat = 21.017012264642755;
@@ -130,6 +133,19 @@ void loop()
   // loop through the steps
   for (const Step &step : steps)
   {
+    Serial.print("Step ");
+    Serial.print(step.type);
+    Serial.print(" - ");
+    Serial.print(step.distance);
+    Serial.print(" - ");
+    Serial.print(step.targetLat);
+    Serial.print(" - ");
+    Serial.print(step.targetLon);
+    Serial.print(" - ");
+    Serial.print(step.startLat);
+    Serial.print(" - ");
+    Serial.println(step.startLon);
+
     float targetBearing = 0.0f;
     float bearingDiff = 0.0f;
     float distance = 0.0f;
@@ -166,6 +182,12 @@ void loop()
         // fix gps distance
         distance = step.distance; // Distance in meters
       }
+      Serial.print("Distance to target: ");
+      Serial.print(distance);
+      Serial.print(" - ");
+      Serial.print("Target bearing: ");
+      Serial.print(targetBearing);
+      Serial.print(" degrees - ");
 
       // Get the current heading using GPS or IMU
       if (gps.course.isValid() && !TESTING)
@@ -178,6 +200,10 @@ void loop()
         currentHeading = robot->getFilteredAngle();
       }
 
+      Serial.print("Current heading: ");
+      Serial.print(currentHeading);
+      Serial.println(" degrees");
+
       // Calculate bearing difference (-180 to 180 degrees)
       bearingDiff = targetBearing - currentHeading;
       if (bearingDiff > 180)
@@ -187,11 +213,11 @@ void loop()
       // Adjust heading if
       if (bearingDiff > 5)
       {
-        robot->turnRight(150);
+        robot->turnRight(50);
       }
       else if (bearingDiff < -5)
       {
-        robot->turnLeft(150);
+        robot->turnLeft(50);
       }
     } while (abs(bearingDiff) > 5);
 
@@ -200,7 +226,7 @@ void loop()
     {
       do
       {
-        robot->moveForward(200);
+        robot->moveForward(100);
         updateCurLocation();
         distance = calculateDistance(currentLat, currentLon, targetLat, targetLon);
       } while (distance > 5 && distance != -1.0f);
@@ -209,11 +235,12 @@ void loop()
     {
       do
       {
-        robot->moveForward(200);
+        robot->moveForward(100);
       } while (robot->getDistanceTraveled() < (step.distance - 1.0f) * 1000.0f);
     }
     // stop the robot
     robot->stop();
+    delay(1000);
     // reset encoders to ready for next step
     robot->resetEncoders();
   }
@@ -243,7 +270,7 @@ void maintainHeading(float targetYaw, double speed)
 }
 
 // calculate distance between 2 GPS points in meters
-float calculateDistance(float lat1, float lon1, float lat2, float lon2)
+float calculateDistance(double lat1, double lon1, double lat2, double lon2)
 {
   // Convert degrees to radians
   float lat1Rad = lat1 * PI / 180.0;
@@ -263,10 +290,10 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2)
 }
 
 // 📌 Tính toán góc giữa 2 điểm GPS don vi do
-float calculateBearing(float lat1, float lon1, float lat2, float lon2)
+float calculateBearing(double lat1, double lon1, double lat2, double lon2)
 {
   // Check if latitude and longitude values are within valid ranges
-  if (checkGpsValid(lat1, lon1) || checkGpsValid(lat2, lon2))
+  if (!checkGpsValid(lat1, lon1) || !checkGpsValid(lat2, lon2))
   {
     Serial.println("Invalid latitude or longitude values");
     return 0; // Return 0 or handle error as needed
@@ -381,14 +408,14 @@ void updateCurLocation()
   }
 }
 
-bool checkGpsValid(float &lat, float &lon)
+bool checkGpsValid(double &lat, double &lon)
 {
-  if (lat == 0.0 && lon == 0.0)
+  if (lat == 0.0f && lon == 0.0f)
   {
     Serial.println("Invalid GPS coordinates");
     return false;
   }
-  else if (lat < -90 || lat > 90 || lon < -180 || lon > 180)
+  else if (lat < -90.0f || lat > 90.0f || lon < -180.0f || lon > 180.0f)
   {
     Serial.println("Invalid latitude or longitude values");
     return false;
@@ -401,9 +428,9 @@ bool checkGpsValid(float &lat, float &lon)
 
 float normalizeAngle(float angle)
 {
-  while (angle > 180)
-    angle -= 360;
-  while (angle < -180)
-    angle += 360;
+  while (angle > 180.0f)
+    angle -= 360.0f;
+  while (angle < -180.0f)
+    angle += 360.0f;
   return angle;
 }

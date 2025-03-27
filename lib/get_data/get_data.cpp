@@ -132,6 +132,7 @@ bool extractStepsFromGeoJSON(const char *json, Step steps[], int &stepCount)
         float latitude = coordinates[endIdx][1];
 
         steps[stepCount] = {
+            id : stepCount,
             step["distance"],
             step["type"],
             targetLat : latitude,

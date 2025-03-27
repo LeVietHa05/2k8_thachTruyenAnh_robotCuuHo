@@ -22,15 +22,15 @@ Robot::Robot(double Kp, double Ki, double Ke)
 // Destructor
 Robot::~Robot()
 {
-    delete leftMotor;
-    delete rightMotor;
+    leftMotor.stop();
+    rightMotor.stop();
 }
 
 // Attach motors to the robot
 void Robot::attachMotors(int pwmL_R, int pwmL_L, int pwmR_R, int pwmR_L)
 {
-    leftMotor = new Motor(pwmL_R, pwmL_L, this->Kp, this->Ki, this->Ke);
-    rightMotor = new Motor(pwmR_R, pwmR_L, this->Kp, this->Ki, this->Ke);
+    leftMotor.begin(pwmL_R, pwmL_L);
+    rightMotor.begin(pwmR_R, pwmR_L);
 }
 
 // Attach encoders to the robot
@@ -136,34 +136,42 @@ float Robot::getRawAngle()
 // Move forward
 void Robot::moveForward(double speed)
 {
-    leftMotor->setTargetSpeed(speed);
-    rightMotor->setTargetSpeed(speed);
+    leftMotor.setTargetSpeed(speed);
+    rightMotor.setTargetSpeed(speed);
+    leftMotor.run();
+    rightMotor.run();
 }
 
 // Move backward
 void Robot::moveBackward(double speed)
 {
-    leftMotor->setTargetSpeed(-speed);
-    rightMotor->setTargetSpeed(-speed);
+    leftMotor.setTargetSpeed(-speed);
+    rightMotor.setTargetSpeed(-speed);
+    leftMotor.run();
+    rightMotor.run();
 }
 
 // Turn left
 void Robot::turnLeft(double speed)
 {
-    leftMotor->setTargetSpeed(-speed);
-    rightMotor->setTargetSpeed(speed);
+    leftMotor.setTargetSpeed(-speed);
+    rightMotor.setTargetSpeed(speed);
+    leftMotor.run();
+    rightMotor.run();
 }
 
 // Turn right
 void Robot::turnRight(double speed)
 {
-    leftMotor->setTargetSpeed(speed);
-    rightMotor->setTargetSpeed(-speed);
+    leftMotor.setTargetSpeed(speed);
+    rightMotor.setTargetSpeed(-speed);
+    leftMotor.run();
+    rightMotor.run();
 }
 
 // Stop
 void Robot::stop()
 {
-    leftMotor->stop();
-    rightMotor->stop();
+    leftMotor.stop();
+    rightMotor.stop();
 }
