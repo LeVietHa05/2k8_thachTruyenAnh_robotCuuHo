@@ -33,6 +33,8 @@ int totalSteps = 0;
 unsigned long lastNavigationUpdate = 0;
 const unsigned long NAVIGATION_UPDATE_INTERVAL = 1000; // Update navigation every 1 second
 bool isGpsWorking = false;
+unsigned long lastUpdateTime = 0;
+const int updateInterval = 50; // Update interval in milliseconds
 
 // Current position and orientation
 double currentLat = 0.0;
@@ -57,50 +59,32 @@ void setup()
   // Initialize GPS serial communication
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
 
-//   WiFiManager wm;
-// 
-//   bool res = wm.autoConnect("AutoConnectAP", "password");
-//   if (!res)
-//   {
-//     Serial.println("Failed to connect to WiFi");
-//     pinMode(LED_BUILTIN, OUTPUT);
-//     while (1)
-//     {
-//       dw(LED_BUILTIN, HIGH);
-//       delay(300);
-//       dw(LED_BUILTIN, LOW);
-//       delay(300);
-//     }
-//   }
-//   Serial.println("Connected!");
+  //   WiFiManager wm;
+  //
+  //   bool res = wm.autoConnect("AutoConnectAP", "password");
+  //   if (!res)
+  //   {
+  //     Serial.println("Failed to connect to WiFi");
+  //     pinMode(LED_BUILTIN, OUTPUT);
+  //     while (1)
+  //     {
+  //       dw(LED_BUILTIN, HIGH);
+  //       delay(300);
+  //       dw(LED_BUILTIN, LOW);
+  //       delay(300);
+  //     }
+  //   }
+  //   Serial.println("Connected!");
   // Update GPS data
   updateCurLocation();
 
   if (TESTING || !isGpsWorking)
   {
-    steps[0].id = 0;
-    steps[0].distance = 10.0f;
-    steps[0].type = 0;
-    steps[0].targetLat = 21.01731031312228;
-    steps[0].targetLon = 105.79836476525836;
-    steps[0].startLat = 21.017901101150503;
-    steps[0].startLon = 105.79856804153376;
-
-    steps[1].id = 1;
-    steps[1].distance = 12.0f;
-    steps[1].type = 0;
-    steps[1].targetLat = 21.017533048366026;
-    steps[1].targetLon = 105.7976265862394;
-    steps[1].startLat = 21.01731031312228;
-    steps[1].startLon = 105.79836476525836;
-
-    steps[2].id = 2;
-    steps[2].distance = 15.0f;
-    steps[2].type = 0;
-    steps[2].targetLat = 21.017012264642755;
-    steps[2].targetLon = 105.79740932732533;
-    steps[2].startLat = 21.017533048366026;
-    steps[2].startLon = 105.7976265862394;
+    steps[0] = {0, 1.0f, FORWARD, 21.01731031312228, 105.79836476525836, 21.017901101150503, 105.79856804153376};
+    steps[1] = {1, 0.2f, TURN_LEFT, 21.017533048366026, 105.7976265862394, 21.01731031312228, 105.79836476525836};
+    steps[2] = {2, 1.50f, FORWARD, 21.017012264642755, 105.79740932732533, 21.017533048366026, 105.7976265862394};
+    steps[3] = {3, 0.1f, STOP, 0, 0, 0, 0};
+    totalSteps = sizeof(steps) / sizeof(steps[0]);
   }
   else
   {
@@ -124,11 +108,119 @@ void setup()
 
 void loop()
 {
-  while (TESTING)
+  if (TESTING)
   {
-    robot->updateMotorSpeeds();
-    robot->debugRobot();
-    robot->moveForward(10);
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastUpdateTime < updateInterval)
+      return;
+
+    lastUpdateTime = currentMillis;
+
+    if (currentStepIndex >= totalSteps)
+    {
+      // End of route reached
+      robot->balanceSpdNoPWM(0); // Dừng robot
+      Serial.println("Destination reached!");
+      return;
+    }
+
+    Step currentStep = steps[currentStepIndex];
+
+    updateCurLocation(); // Cập nhật vị trí hiện tại từ GPS
+    double distanceTraveled;
+    double targetDistance = currentStep.distance; // Độ dài của bước hiện tại
+    if (currentLat == 0.0f || currentLon == 0.0f)
+    {
+      distanceTraveled = robot->getDistanceTraveled(); // Lấy khoảng cách từ encoder
+    }
+    else
+      distanceTraveled = calculateDistance(currentLat, currentLon, currentStep.targetLat, currentStep.targetLon);
+
+    switch (currentStep.type)
+    {
+    case FORWARD:
+      if (distanceTraveled < (targetDistance - 0.2f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 20cm
+      {
+        robot->balanceSpdNoPWM(50); // Chạy về phía trước
+      }
+      else
+      {
+        robot->balanceSpdNoPWM(0); // Dừng robot
+        if (robot->isStop())
+        {
+          robot->resetEncoders(); // Reset encoder
+          currentStepIndex++;
+          Serial.println("Moving to next step");
+        }
+      }
+      break;
+
+    case TURN_LEFT:
+      if (distanceTraveled < (targetDistance - 0.05f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 5cm
+      {
+        robot->turnLeftNoPWM(50); // Quay trái
+      }
+      else
+      {
+        robot->balanceSpdNoPWM(0); // Dừng robot
+        if (robot->isStop())
+        {
+          robot->resetEncoders(); // Reset encoder
+          currentStepIndex++;
+          Serial.println("Moving to next step");
+        }
+      }
+      break;
+
+    case TURN_RIGHT:
+      if (distanceTraveled < (targetDistance - 0.05f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 5cm
+      {
+        robot->turnRightNoPWM(50); // Quay phải
+      }
+      else
+      {
+        robot->balanceSpdNoPWM(0); // Dừng robot
+        if (robot->isStop())
+        {
+          robot->resetEncoders(); // Reset encoder
+          currentStepIndex++;
+          Serial.println("Moving to next step");
+        }
+      }
+
+    default:
+      robot->balanceSpdNoPWM(0); // Dừng robot
+      break;
+    }
+    // while (robot->getDistanceTraveled() < 1000.0f)
+    // {
+    //   // robot->updateMotorSpeeds();
+    //   robot->balanceSpdNoPWM(50);
+    //   delay(100);
+    // }
+    // robot->balanceSpdNoPWM(0);
+    // Serial.println("------------------------------------------------!");
+    // delay(5000);
+    // robot->resetEncoders();
+    // while (robot->getDistanceTraveled() < 200.0f)
+    // {
+    //   robot->turnLeftNoPWM(50);
+    //   delay(100);
+    // }
+    // robot->balanceSpdNoPWM(0);
+    // Serial.println("------------------------------------------------!");
+    // delay(2500);
+    // robot->resetEncoders();
+    // while (robot->getDistanceTraveled() < 500.0f)
+    // {
+    //   robot->balanceSpdNoPWM(50);
+    //   // robot->moveForward(20);
+    //   delay(100);
+    // }
+    // Serial.println("------------------------------------------------!");
+    // robot->balanceSpdNoPWM(0);
+    // delay(100000);
+    // robot->resetEncoders();
     // if (Serial.available() > 0)
     // {
     //   char c = Serial.read();
@@ -152,132 +244,133 @@ void loop()
     //   {
     //     robot->stop();
     //   }
-    
   }
-  // Update GPS data
-  while (gpsSerial.available() > 0)
+  else
   {
-    gps.encode(gpsSerial.read());
-    isGpsWorking = true;
-  }
 
-  // loop through the steps
-  for (const Step &step : steps)
-  {
-    Serial.print("Step ");
-    Serial.print(step.type);
-    Serial.print(" - ");
-    Serial.print(step.distance);
-    Serial.print(" - ");
-    Serial.print(step.targetLat);
-    Serial.print(" - ");
-    Serial.print(step.targetLon);
-    Serial.print(" - ");
-    Serial.print(step.startLat);
-    Serial.print(" - ");
-    Serial.println(step.startLon);
-
-    float targetBearing = 0.0f;
-    float bearingDiff = 0.0f;
-    float distance = 0.0f;
-    targetLat = step.targetLat;
-    targetLon = step.targetLon;
-    float startLat = step.startLat;
-    float startLon = step.startLon;
-
-    // keep turning till bearing difference is less than 5 degrees
-    // to do this: need current heading and target bearing
-    do
+    // Update GPS data
+    while (gpsSerial.available() > 0)
     {
-      robot->updateMotorSpeeds();
-      // Update GPS data again if available
-      while (gpsSerial.available() > 0)
+      gps.encode(gpsSerial.read());
+      isGpsWorking = true;
+    }
+
+    // loop through the steps
+    for (const Step &step : steps)
+    {
+      Serial.print("Step ");
+      Serial.print(step.type);
+      Serial.print(" - ");
+      Serial.print(step.distance);
+      Serial.print(" - ");
+      Serial.print(step.targetLat);
+      Serial.print(" - ");
+      Serial.print(step.targetLon);
+      Serial.print(" - ");
+      Serial.print(step.startLat);
+      Serial.print(" - ");
+      Serial.println(step.startLon);
+
+      float targetBearing = 0.0f;
+      float bearingDiff = 0.0f;
+      float distance = 0.0f;
+      targetLat = step.targetLat;
+      targetLon = step.targetLon;
+      float startLat = step.startLat;
+      float startLon = step.startLon;
+
+      // keep turning till bearing difference is less than 5 degrees
+      // to do this: need current heading and target bearing
+      do
       {
-        gps.encode(gpsSerial.read());
-        isGpsWorking = true;
-      }
-      // if gps good
-      if (gps.location.isValid() && !TESTING)
+        robot->updateMotorSpeeds();
+        // Update GPS data again if available
+        while (gpsSerial.available() > 0)
+        {
+          gps.encode(gpsSerial.read());
+          isGpsWorking = true;
+        }
+        // if gps good
+        if (gps.location.isValid() && !TESTING)
+        {
+          isGpsWorking = true;
+          currentLat = gps.location.lat();
+          currentLon = gps.location.lng();
+          targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
+          // Calculate distance to target using GPS
+          distance = calculateDistance(currentLat, currentLon, targetLat, targetLon); // Distance in meters
+        }
+        else
+        {
+          // or else use the default GPS data
+          isGpsWorking = false;
+          targetBearing = calculateBearing(startLat, startLon, targetLat, targetLon);
+          // fix gps distance
+          distance = step.distance; // Distance in meters
+        }
+        Serial.print(distance);
+        Serial.print(" - ");
+        Serial.print(targetBearing);
+        Serial.print(" - ");
+
+        // Get the current heading using GPS or IMU
+        if (gps.course.isValid() && !TESTING)
+        {
+          currentHeading = gps.course.deg();
+        }
+        else
+        {
+          robot->updateIMUdata();
+          currentHeading = robot->getFilteredAngle();
+        }
+        Serial.print(currentHeading);
+        Serial.println("");
+
+        // Calculate bearing difference (-180 to 180 degrees)
+        bearingDiff = targetBearing - currentHeading;
+        if (bearingDiff > 180)
+          bearingDiff -= 360;
+        if (bearingDiff < -180)
+          bearingDiff += 360;
+        // Adjust heading if
+        if (bearingDiff > 5)
+        {
+          robot->turnRight(10);
+        }
+        else if (bearingDiff < -5)
+        {
+          robot->turnLeft(10);
+        }
+        delay(45);
+      } while (abs(bearingDiff) > 5);
+
+      // move forward
+      if (isGpsWorking && !TESTING)
       {
-        isGpsWorking = true;
-        currentLat = gps.location.lat();
-        currentLon = gps.location.lng();
-        targetBearing = calculateBearing(currentLat, currentLon, targetLat, targetLon);
-        // Calculate distance to target using GPS
-        distance = calculateDistance(currentLat, currentLon, targetLat, targetLon); // Distance in meters
+        do
+        {
+          delay(50);
+          robot->updateMotorSpeeds();
+          robot->moveForward(30);
+          updateCurLocation();
+          distance = calculateDistance(currentLat, currentLon, targetLat, targetLon);
+        } while (distance > 5 && distance != -1.0f);
       }
       else
       {
-        // or else use the default GPS data
-        isGpsWorking = false;
-        targetBearing = calculateBearing(startLat, startLon, targetLat, targetLon);
-        // fix gps distance
-        distance = step.distance; // Distance in meters
+        do
+        {
+          delay(50);
+          robot->updateMotorSpeeds();
+          robot->moveForward(30);
+        } while (robot->getDistanceTraveled() < (step.distance - 1.0f) * 1000.0f);
       }
-      Serial.print(distance);
-      Serial.print(" - ");
-      Serial.print(targetBearing);
-      Serial.print(" - ");
-
-      // Get the current heading using GPS or IMU
-      if (gps.course.isValid() && !TESTING)
-      {
-        currentHeading = gps.course.deg();
-      }
-      else
-      {
-        robot->updateIMUdata();
-        currentHeading = robot->getFilteredAngle();
-      }
-      Serial.print(currentHeading);
-      Serial.println("");
-
-      // Calculate bearing difference (-180 to 180 degrees)
-      bearingDiff = targetBearing - currentHeading;
-      if (bearingDiff > 180)
-        bearingDiff -= 360;
-      if (bearingDiff < -180)
-        bearingDiff += 360;
-      // Adjust heading if
-      if (bearingDiff > 5)
-      {
-        robot->turnRight(10);
-      }
-      else if (bearingDiff < -5)
-      {
-        robot->turnLeft(10);
-      }
-      delay(45);
-    } while (abs(bearingDiff) > 5);
-
-    // move forward
-    if (isGpsWorking && !TESTING)
-    {
-      do
-      {
-        delay(50);
-        robot->updateMotorSpeeds();
-        robot->moveForward(30);
-        updateCurLocation();
-        distance = calculateDistance(currentLat, currentLon, targetLat, targetLon);
-      } while (distance > 5 && distance != -1.0f);
+      // stop the robot
+      robot->stop();
+      delay(1000);
+      // reset encoders to ready for next step
+      robot->resetEncoders();
     }
-    else
-    {
-      do
-      {
-        delay(50);
-        robot->updateMotorSpeeds();
-        robot->moveForward(30);
-      }
-      while (robot->getDistanceTraveled() < (step.distance - 1.0f) * 1000.0f)
-        ;
-    }
-    // stop the robot
-    robot->stop();
-    delay(1000);
-    // reset encoders to ready for next step
-    robot->resetEncoders();
   }
 }
 
