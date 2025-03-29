@@ -268,13 +268,13 @@ void Robot::initSyncPID(double Kp, double Ki, double Kd)
 }
 
 // only for forward and backward
-void Robot::balanceSpdNoPWM(int targetSpeed)
+void Robot::balanceSpdNoPWM(int leftTargetSpeed, int rightTargetSpeed)
 {
-    // Nếu tốc độ mục tiêu là 0, dừng động cơ
-    if (targetSpeed == 0)
+    if (leftTargetSpeed == 0 && rightTargetSpeed == 0)
     {
         leftMotor.setSpdNoPID(0);
         rightMotor.setSpdNoPID(0);
+        resetEncoders(); // Reset encoder
         return;
     }
     // Lấy số xung từ encoder
@@ -282,14 +282,15 @@ void Robot::balanceSpdNoPWM(int targetSpeed)
     long rightCount = rightEncoder.getCount();
 
     // Giới hạn tốc độ mục tiêu
-    targetSpeed = constrain(targetSpeed, 0, MAX_SPEED);
+    leftTargetSpeed = constrain(leftTargetSpeed, 0, MAX_SPEED);
+    rightTargetSpeed = constrain(rightTargetSpeed, 0, MAX_SPEED);
 
     // Tính sai lệch giữa 2 encoder
     long error = (leftCount - rightCount); // Sai lệch giữa 2 động cơ
 
     // Điều chỉnh tốc độ dựa trên sai lệch
-    int leftAdjustSpeed = targetSpeed - 0.1 * (error / 2);  // Động cơ trái
-    int rightAdjustSpeed = targetSpeed + 0.1 * (error / 2); // Động cơ phải
+    int leftAdjustSpeed = leftTargetSpeed - 0.1 * (error / 2);   // Động cơ trái
+    int rightAdjustSpeed = rightTargetSpeed + 0.1 * (error / 2); // Động cơ phải
 
     // Giới hạn tốc độ sau điều chỉnh
     leftAdjustSpeed = constrain(leftAdjustSpeed, 0, MAX_SPEED);

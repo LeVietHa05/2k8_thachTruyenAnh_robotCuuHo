@@ -129,12 +129,12 @@ double Motor::getSetpoint()
 void Motor::setSpdNoPID(int setSpeed)
 {
     #define SPEED_STEP 5 // Bước tăng tốc độ
-    if (setSpeed == 0)
-    {
-        spdNoPWM = 0; // Dừng động cơ
-        runPWM(0);
-        return;
-    }
+    // if (setSpeed == 0)
+    // {
+    //     spdNoPWM = 0; // Dừng động cơ
+    //     runPWM(0);
+    //     return;
+    // }
     // Giới hạn setSpeed trong khoảng 0-255
     setSpeed = constrain(setSpeed, 0, MAX_SPEED);
 

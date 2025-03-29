@@ -38,7 +38,7 @@ public:
     void updateMotorSpeeds();
     void debugRobot();
     void initSyncPID(double Kp, double Ki, double Kd);
-    void balanceSpdNoPWM(int targetSpeed);
+    void balanceSpdNoPWM(int leftTargetSpeed, int rightTargetSpeed);
     void turnLeftNoPWM(int targetSpeed);
     void turnRightNoPWM(int targetSpeed);
     bool isStop();

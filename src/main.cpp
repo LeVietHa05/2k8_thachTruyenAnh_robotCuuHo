@@ -7,6 +7,7 @@
 
 #include "config.h" // Include configuration for host and API key
 #define TESTING 1
+#define SERIAL_TESTING 0
 
 // Define the variables
 const char *apiKey = "5b3ce3597851110001cf62489b1a4894dc59438fa047b32238086ce2";
@@ -34,7 +35,7 @@ unsigned long lastNavigationUpdate = 0;
 const unsigned long NAVIGATION_UPDATE_INTERVAL = 1000; // Update navigation every 1 second
 bool isGpsWorking = false;
 unsigned long lastUpdateTime = 0;
-const int updateInterval = 50; // Update interval in milliseconds
+const int updateInterval = 40; // Update interval in milliseconds
 
 // Current position and orientation
 double currentLat = 0.0;
@@ -81,7 +82,7 @@ void setup()
   if (TESTING || !isGpsWorking)
   {
     steps[0] = {0, 1.0f, FORWARD, 21.01731031312228, 105.79836476525836, 21.017901101150503, 105.79856804153376};
-    steps[1] = {1, 0.2f, TURN_LEFT, 21.017533048366026, 105.7976265862394, 21.01731031312228, 105.79836476525836};
+    steps[1] = {1, 0.2f, TURN_RIGHT, 21.017533048366026, 105.7976265862394, 21.01731031312228, 105.79836476525836};
     steps[2] = {2, 1.50f, FORWARD, 21.017012264642755, 105.79740932732533, 21.017533048366026, 105.7976265862394};
     steps[3] = {3, 0.1f, STOP, 0, 0, 0, 0};
     totalSteps = sizeof(steps) / sizeof(steps[0]);
@@ -113,13 +114,13 @@ void loop()
     unsigned long currentMillis = millis();
     if (currentMillis - lastUpdateTime < updateInterval)
       return;
-
+    robot->updateIMUdata();
     lastUpdateTime = currentMillis;
 
     if (currentStepIndex >= totalSteps)
     {
       // End of route reached
-      robot->balanceSpdNoPWM(0); // Dừng robot
+      robot->balanceSpdNoPWM(0, 0); // Dừng robot
       Serial.println("Destination reached!");
       return;
     }
@@ -128,122 +129,110 @@ void loop()
 
     updateCurLocation(); // Cập nhật vị trí hiện tại từ GPS
     double distanceTraveled;
+    double targetBearing = 0.0f;
+    double currentBearing = 0.0f;
     double targetDistance = currentStep.distance; // Độ dài của bước hiện tại
     if (currentLat == 0.0f || currentLon == 0.0f)
     {
-      distanceTraveled = robot->getDistanceTraveled(); // Lấy khoảng cách từ encoder
+      currentBearing = robot->getFilteredAngle();                                                                                 // Lấy góc hiện tại từ IMU
+      distanceTraveled = robot->getDistanceTraveled();                                                                            // Lấy khoảng cách từ encoder
+      targetBearing = calculateBearing(currentStep.startLat, currentStep.startLon, currentStep.targetLat, currentStep.targetLon); // Tính toán góc đến điểm đích
     }
     else
+    {
+      currentBearing = gps.course.deg(); // Lấy góc hiện tại từ GPS
       distanceTraveled = calculateDistance(currentLat, currentLon, currentStep.targetLat, currentStep.targetLon);
+      targetBearing = calculateBearing(currentLat, currentLon, currentStep.targetLat, currentStep.targetLon); // Tính toán góc đến điểm đích
+    }
+
+    double angleDiff = targetBearing - currentBearing; // Tính toán độ chênh lệch giữa góc
+    if (angleDiff > 180.0f)
+      angleDiff -= 360.0f; // Chuyển đổi về khoảng -180 đến 180 độ
+    if (angleDiff < -180.0f)
+      angleDiff += 360.0f;
+    Serial.print("heading: ");
+    Serial.print(currentBearing);
+    Serial.print(", target: ");
+    Serial.print(targetBearing);
+    Serial.print(", diff: ");
+    Serial.print(angleDiff);
 
     switch (currentStep.type)
     {
     case FORWARD:
       if (distanceTraveled < (targetDistance - 0.2f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 20cm
       {
-        robot->balanceSpdNoPWM(50); // Chạy về phía trước
+        Serial.print(" - ");
+        Serial.print(distanceTraveled);
+        Serial.print(" - ");
+        Serial.println(targetDistance);
+        robot->balanceSpdNoPWM(50, 50); // Chạy về phía trước
       }
       else
       {
-        robot->balanceSpdNoPWM(0); // Dừng robot
-        if (robot->isStop())
-        {
-          robot->resetEncoders(); // Reset encoder
-          currentStepIndex++;
-          Serial.println("Moving to next step");
-        }
+        robot->resetEncoders(); // Reset encoder
+        currentStepIndex++;
+        Serial.println("Moving to next step");
       }
       break;
 
     case TURN_LEFT:
-      if (distanceTraveled < (targetDistance - 0.05f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 5cm
+      if (angleDiff > 5.0f)
       {
         robot->turnLeftNoPWM(50); // Quay trái
       }
       else
       {
-        robot->balanceSpdNoPWM(0); // Dừng robot
-        if (robot->isStop())
-        {
-          robot->resetEncoders(); // Reset encoder
-          currentStepIndex++;
-          Serial.println("Moving to next step");
-        }
+        robot->resetEncoders(); // Reset encoder
+        currentStepIndex++;
+        Serial.println("Moving to next step");
       }
       break;
 
     case TURN_RIGHT:
-      if (distanceTraveled < (targetDistance - 0.05f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 5cm
+      if (angleDiff < -5.0f)
       {
         robot->turnRightNoPWM(50); // Quay phải
       }
       else
       {
-        robot->balanceSpdNoPWM(0); // Dừng robot
-        if (robot->isStop())
-        {
-          robot->resetEncoders(); // Reset encoder
-          currentStepIndex++;
-          Serial.println("Moving to next step");
-        }
+        robot->resetEncoders(); // Reset encoder
+        currentStepIndex++;
+        Serial.println("Moving to next step");
       }
 
     default:
-      robot->balanceSpdNoPWM(0); // Dừng robot
+      robot->balanceSpdNoPWM(0, 0); // Dừng robot
       break;
     }
-    // while (robot->getDistanceTraveled() < 1000.0f)
-    // {
-    //   // robot->updateMotorSpeeds();
-    //   robot->balanceSpdNoPWM(50);
-    //   delay(100);
-    // }
-    // robot->balanceSpdNoPWM(0);
-    // Serial.println("------------------------------------------------!");
-    // delay(5000);
-    // robot->resetEncoders();
-    // while (robot->getDistanceTraveled() < 200.0f)
-    // {
-    //   robot->turnLeftNoPWM(50);
-    //   delay(100);
-    // }
-    // robot->balanceSpdNoPWM(0);
-    // Serial.println("------------------------------------------------!");
-    // delay(2500);
-    // robot->resetEncoders();
-    // while (robot->getDistanceTraveled() < 500.0f)
-    // {
-    //   robot->balanceSpdNoPWM(50);
-    //   // robot->moveForward(20);
-    //   delay(100);
-    // }
-    // Serial.println("------------------------------------------------!");
-    // robot->balanceSpdNoPWM(0);
-    // delay(100000);
-    // robot->resetEncoders();
-    // if (Serial.available() > 0)
-    // {
-    //   char c = Serial.read();
-    //   if (c == 'w')
-    //   {
-    //     robot->moveForward(15);
-    //   }
-    //   else if (c == 's')
-    //   {
-    //     robot->moveBackward(20);
-    //   }
-    //   else if (c == 'a')
-    //   {
-    //     robot->turnLeft(10);
-    //   }
-    //   else if (c == 'd')
-    //   {
-    //     robot->turnRight(10);
-    //   }
-    //   else if (c == 'x')
-    //   {
-    //     robot->stop();
-    //   }
+  }
+  else if (SERIAL_TESTING)
+  {
+    static char c;
+    if (Serial.available() > 0)
+    {
+      c = Serial.read();
+      if (c == 'w')
+      {
+        robot->balanceSpdNoPWM(50, 50);
+      }
+      else if (c == 's')
+      {
+        robot->balanceSpdNoPWM(0, 0);
+      }
+      else if (c == 'a')
+      {
+        robot->turnLeftNoPWM(50);
+      }
+      else if (c == 'd')
+      {
+        robot->turnRightNoPWM(50);
+      }
+      else if (c == 'x')
+      {
+        robot->stop();
+      }
+    }
   }
   else
   {
