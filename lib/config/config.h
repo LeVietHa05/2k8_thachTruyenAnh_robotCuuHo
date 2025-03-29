@@ -25,8 +25,8 @@ extern Step steps[MAX_STEPS_ALLOWED]; // Declare as extern
 
 #define ENC_L_A 33
 #define ENC_L_B 32
-#define ENC_R_A 34
-#define ENC_R_B 35
+#define ENC_R_A 5
+#define ENC_R_B 18
 
 #define PWM_CHANNEL0 0
 #define PWM_CHANNEL1 1
