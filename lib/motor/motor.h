@@ -5,6 +5,9 @@
 #include <Arduino.h>
 #include <PID_v1.h>
 
+
+#define MAX_SPEED 150 // Maximum speed for the motor
+
 class Motor
 {
 private:
@@ -17,6 +20,7 @@ private:
     int PWM_RESOLUTION = 8;
     int channelR, channelL;
     int find_free_ledc_channel();
+    int spdNoPWM = 0; // speed without PWM
 
 public:
     Motor();
@@ -29,6 +33,8 @@ public:
     void debugMotor();
     void runPWM(int pwmValue);
     double getSetpoint();
+    void setSpdNoPID(int setSpeed);
+    int getSpdNoPID();
 };
 
 #endif

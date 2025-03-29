@@ -7,7 +7,7 @@
 #define PULSES_PER_REV 800    // encoder pulses per revolution
 #define WHEEL_DIAMETER_MM 100 // wheel diameter in mm
 #define MM_PER_PULSE (3.14159 * WHEEL_DIAMETER_MM / PULSES_PER_REV)
-#define MAX_SPEED 333 // RPM
+#define MAX_SPEED_RPM 333 // RPM
 
 MPU6050 mpu;
 Mahony filter;
@@ -20,7 +20,7 @@ Robot::Robot(double Kp, double Ki, double Kd)
 {
     leftMotor.beginPID(Kp, Ki, Kd);
     rightMotor.beginPID(Kp, Ki, Kd);
-    initSyncPID(0.5, 0.0, 1.0);
+    initSyncPID(0.1, 0.0, 1.0);
 }
 
 // Destructor
@@ -142,7 +142,7 @@ void Robot::moveForward(double speed)
 {
     // spd: 0 - 100 %
     // targetspd: 0 - 800 (pulse/s)
-    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    int targetSpeed = speed * MAX_SPEED_RPM * PULSES_PER_REV / 60 / 100;
     leftMotor.setTargetSpeed(targetSpeed + offset);
     rightMotor.setTargetSpeed(targetSpeed);
     leftMotor.run();
@@ -153,7 +153,7 @@ void Robot::moveForward(double speed)
 // Move backward
 void Robot::moveBackward(double speed)
 {
-    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    int targetSpeed = speed * MAX_SPEED_RPM * PULSES_PER_REV / 60 / 100;
     leftMotor.setTargetSpeed(-targetSpeed - offset);
     rightMotor.setTargetSpeed(-targetSpeed);
     leftMotor.run();
@@ -164,7 +164,7 @@ void Robot::moveBackward(double speed)
 // Turn left
 void Robot::turnLeft(double speed)
 {
-    int targetSpeed = speed * MAX_SPEED * PULSES_PER_REV / 60 / 100;
+    int targetSpeed = speed * MAX_SPEED_RPM * PULSES_PER_REV / 60 / 100;
     leftMotor.setTargetSpeed(0);
     rightMotor.setTargetSpeed(targetSpeed);
     leftMotor.run();
@@ -237,21 +237,22 @@ void Robot::updateMotorSpeeds()
         rightMotor.setTargetSpeed(rightMotor.getSetpoint());
 
         // Debug
-        Serial.print("Left Speed: ");
+        Serial.print(" - pid speed ");
         Serial.print(leftSpeed);
-        Serial.print(" | Right Speed: ");
+        Serial.print(" | ");
         Serial.print(rightSpeed);
-        Serial.print(" | Offset: ");
+        Serial.print(" | ");
         Serial.println(offset);
     }
 }
 
 void Robot::debugRobot()
 {
+    Serial.print(" - encoder ");
     Serial.print(leftEncoder.getCount());
-    Serial.print(" - ");
+    Serial.print(" | ");
     Serial.print(rightEncoder.getCount());
-    Serial.println("");
+    Serial.print("");
     // leftMotor.debugMotor();
     // Serial.print("Right motor: ");
     // rightMotor.debugMotor();
@@ -263,5 +264,61 @@ void Robot::initSyncPID(double Kp, double Ki, double Kd)
     syncPID.SetMode(AUTOMATIC);
     syncPID.SetTunings(Kp, Ki, Kd);
     syncPID.SetSampleTime(10);
-    syncPID.SetOutputLimits(-50, 50); // Giới hạn offset
+    syncPID.SetOutputLimits(-20, 20); // Giới hạn offset
+}
+
+// only for forward and backward
+void Robot::balanceSpdNoPWM(int targetSpeed)
+{
+    // Nếu tốc độ mục tiêu là 0, dừng động cơ
+    if (targetSpeed == 0)
+    {
+        leftMotor.setSpdNoPID(0);
+        rightMotor.setSpdNoPID(0);
+        return;
+    }
+    // Lấy số xung từ encoder
+    long leftCount = leftEncoder.getCount();
+    long rightCount = rightEncoder.getCount();
+
+    // Giới hạn tốc độ mục tiêu
+    targetSpeed = constrain(targetSpeed, 0, MAX_SPEED);
+
+    // Tính sai lệch giữa 2 encoder
+    long error = (leftCount - rightCount); // Sai lệch giữa 2 động cơ
+
+    // Điều chỉnh tốc độ dựa trên sai lệch
+    int leftAdjustSpeed = targetSpeed - 0.1 * (error / 2);  // Động cơ trái
+    int rightAdjustSpeed = targetSpeed + 0.1 * (error / 2); // Động cơ phải
+
+    // Giới hạn tốc độ sau điều chỉnh
+    leftAdjustSpeed = constrain(leftAdjustSpeed, 0, MAX_SPEED);
+    rightAdjustSpeed = constrain(rightAdjustSpeed, 0, MAX_SPEED);
+
+    // Cập nhật tốc độ mục tiêu
+    leftTargetSpeed = leftAdjustSpeed;
+    rightTargetSpeed = rightAdjustSpeed;
+
+    // Thay đổi tốc độ từ từ đến giá trị mục tiêu
+    leftMotor.setSpdNoPID(leftTargetSpeed);
+    rightMotor.setSpdNoPID(rightTargetSpeed);
+}
+
+// turn left without PWM
+void Robot::turnLeftNoPWM(int targetSpeed)
+{
+    leftMotor.setSpdNoPID(0);            // Dừng động cơ trái
+    rightMotor.setSpdNoPID(targetSpeed); // Chạy động cơ phải
+}
+
+// turn right without PWM
+void Robot::turnRightNoPWM(int targetSpeed)
+{
+    leftMotor.setSpdNoPID(targetSpeed); // Chạy động cơ trái
+    rightMotor.setSpdNoPID(0);          // Dừng động cơ phải
+}
+
+bool Robot::isStop()
+{
+    return (leftMotor.getSpdNoPID() == 0 && rightMotor.getSpdNoPID() == 0);
 }

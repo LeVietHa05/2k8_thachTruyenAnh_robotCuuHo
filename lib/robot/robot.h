@@ -13,8 +13,9 @@ private:
     double Kp, Ki, Kd;
     PID syncPID; // PID để đồng bộ tốc độ
     double syncSetpoint, syncInput, syncOutput;
-    int offset = 0; //for leftmotor (it slower than right motor)
-
+    int offset = 0; // for leftmotor (it slower than right motor)
+    int leftTargetSpeed = 0;
+    int rightTargetSpeed = 0;
 public:
     Robot(double Kp, double Ki, double Kd);
     ~Robot();
@@ -37,6 +38,10 @@ public:
     void updateMotorSpeeds();
     void debugRobot();
     void initSyncPID(double Kp, double Ki, double Kd);
+    void balanceSpdNoPWM(int targetSpeed);
+    void turnLeftNoPWM(int targetSpeed);
+    void turnRightNoPWM(int targetSpeed);
+    bool isStop();
 };
 
 #endif

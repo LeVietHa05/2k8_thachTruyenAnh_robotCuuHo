@@ -83,7 +83,7 @@ void Motor::updateSpeed(double measuredSpeed)
 
 void Motor::run()
 {
-    int pwmValue = constrain(output, 0, 255);
+    int pwmValue = constrain(output, 0, MAX_SPEED);
     if (setpoint > 0)
     {
         ledcWrite(channelR, pwmValue);
@@ -124,4 +124,38 @@ void Motor::runPWM(int pwmValue)
 double Motor::getSetpoint()
 {
     return setpoint;
+}
+
+void Motor::setSpdNoPID(int setSpeed)
+{
+    #define SPEED_STEP 5 // Bước tăng tốc độ
+    if (setSpeed == 0)
+    {
+        spdNoPWM = 0; // Dừng động cơ
+        runPWM(0);
+        return;
+    }
+    // Giới hạn setSpeed trong khoảng 0-255
+    setSpeed = constrain(setSpeed, 0, MAX_SPEED);
+
+    // Tăng hoặc giảm tốc độ từ từ
+    if (spdNoPWM < setSpeed)
+    {
+        spdNoPWM += SPEED_STEP;
+        if (spdNoPWM > setSpeed)
+            spdNoPWM = setSpeed; // Không vượt quá setSpeed
+    }
+    else if (spdNoPWM > setSpeed)
+    {
+        spdNoPWM -= SPEED_STEP;
+        if (spdNoPWM < setSpeed)
+            spdNoPWM = setSpeed; // Không thấp hơn setSpeed
+    }
+
+    runPWM(spdNoPWM);
+}
+
+int Motor::getSpdNoPID()
+{
+    return spdNoPWM;
 }
