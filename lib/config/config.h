@@ -23,10 +23,10 @@ extern Step steps[MAX_STEPS_ALLOWED]; // Declare as extern
 #define MT2_L 14
 #define MT2_R 27
 
-#define ENC_L_A 33
-#define ENC_L_B 32
-#define ENC_R_A 5
-#define ENC_R_B 18
+#define ENC_L_A 32
+#define ENC_L_B 33
+#define ENC_R_A 18
+#define ENC_R_B 5
 
 #define PWM_CHANNEL0 0
 #define PWM_CHANNEL1 1

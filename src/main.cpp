@@ -35,7 +35,10 @@ unsigned long lastNavigationUpdate = 0;
 const unsigned long NAVIGATION_UPDATE_INTERVAL = 1000; // Update navigation every 1 second
 bool isGpsWorking = false;
 unsigned long lastUpdateTime = 0;
-const int updateInterval = 40; // Update interval in milliseconds
+const int updateInterval = 40;    // Update interval in milliseconds
+const float angleThreshold = 5.0; // Angle threshold for turning
+float isInitialized = false;      // Flag to check if the robot is initialized
+double referenceAngle = 0.0;
 
 // Current position and orientation
 double currentLat = 0.0;
@@ -86,6 +89,8 @@ void setup()
     steps[2] = {2, 1.50f, FORWARD, 21.017012264642755, 105.79740932732533, 21.017533048366026, 105.7976265862394};
     steps[3] = {3, 0.1f, STOP, 0, 0, 0, 0};
     totalSteps = sizeof(steps) / sizeof(steps[0]);
+    Serial.println(calculateBearing(steps[0].startLat, steps[0].startLon, steps[0].targetLat, steps[0].targetLon));
+    // delay(10000);
   }
   else
   {
@@ -96,6 +101,14 @@ void setup()
     else
     {
       Serial.println("Failed to fetch route");
+    }
+    totalSteps = sizeof(steps) / sizeof(steps[0]);
+    for (int i = 0; i < totalSteps; i++)
+    {
+      // calculate the bearing and distance
+      double bearing = calculateBearing(steps[i].startLat, steps[i].startLon, steps[i].targetLat, steps[i].targetLon);
+      // TODO:  and then set the TYPE of steps
+      //  steps[i].type = getStepType(bearing);
     }
   }
 
@@ -134,7 +147,7 @@ void loop()
     double targetDistance = currentStep.distance; // Độ dài của bước hiện tại
     if (currentLat == 0.0f || currentLon == 0.0f)
     {
-      currentBearing = robot->getFilteredAngle();                                                                                 // Lấy góc hiện tại từ IMU
+      currentBearing = robot->getFilteredAngle() - referenceAngle;                                                                // Lấy góc hiện tại từ IMU
       distanceTraveled = robot->getDistanceTraveled();                                                                            // Lấy khoảng cách từ encoder
       targetBearing = calculateBearing(currentStep.startLat, currentStep.startLon, currentStep.targetLat, currentStep.targetLon); // Tính toán góc đến điểm đích
     }
@@ -157,15 +170,45 @@ void loop()
     Serial.print(", diff: ");
     Serial.print(angleDiff);
 
+    // // Căn chỉnh ban đầu nếu chưa khởi tạo
+    // if (!isInitialized)
+    // {
+    //   if (abs(angleDiff) > angleThreshold)
+    //   {
+    //     if (angleDiff > 0)
+    //     {
+    //       robot->turnLeftNoPWM(50); // Quay trái nếu lệch dương
+    //     }
+    //     else
+    //     {
+    //       robot->turnRightNoPWM(50); // Quay phải nếu lệch âm
+    //     }
+    //   }
+    //   else
+    //   {
+    //     robot->balanceSpdNoPWM(0, 0);
+    //     if (robot->isStop())
+    //     {
+    //       referenceAngle = robot->getFilteredAngle(); // Cập nhật lại để currentAngle = 0
+    //       isInitialized = true;
+    //       Serial.println("Initial alignment completed");
+    //       delay(1000);
+    //     }
+    //   }
+    //   return;
+    // }
+
     switch (currentStep.type)
     {
     case FORWARD:
       if (distanceTraveled < (targetDistance - 0.2f) * 1000.0f) // Nếu khoảng cách di chuyển nhỏ hơn 20cm
       {
-        Serial.print(" - ");
+        Serial.print(" - case: ");
+        Serial.print("FORWARD");
+        Serial.print(" - distance: ");
         Serial.print(distanceTraveled);
-        Serial.print(" - ");
-        Serial.println(targetDistance);
+        Serial.print(" - targetDistance: ");
+        Serial.println(targetDistance * 1000.0f);
         robot->balanceSpdNoPWM(50, 50); // Chạy về phía trước
       }
       else
@@ -409,7 +452,6 @@ float calculateDistance(double lat1, double lon1, double lat2, double lon2)
 // 📌 Tính toán góc giữa 2 điểm GPS don vi do
 float calculateBearing(double lat1, double lon1, double lat2, double lon2)
 {
-  // Check if latitude and longitude values are within valid ranges
   if (!checkGpsValid(lat1, lon1) || !checkGpsValid(lat2, lon2))
   {
     Serial.println("Invalid latitude or longitude values");
@@ -421,7 +463,14 @@ float calculateBearing(double lat1, double lon1, double lat2, double lon2)
 
   float y = sin(dLon) * cos(lat2);
   float x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
-  return degrees(atan2(y, x));
+  float bearing = degrees(atan2(y, x));
+
+  // Chuẩn hóa về [-180°, 180°]
+  if (bearing > 180.0)
+    bearing -= 360.0;
+  if (bearing < -180.0)
+    bearing += 360.0;
+  return bearing;
 }
 
 void updateNavigation()
